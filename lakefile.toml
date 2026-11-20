@@ -59,3 +59,8 @@ globs = ["Supplements.+"]
 [[lean_lib]]
 name = "Main"
 roots = ["Statements", "Main"]
+# --- rh-lean-check: everything below this line was added for Comparator; it is not part of the submission ---
+
+[[lean_lib]]
+name = "Challenge"
+roots = ["Challenge"]
