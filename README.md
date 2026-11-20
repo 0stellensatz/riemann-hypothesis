@@ -16,20 +16,6 @@ does not include:
 | [`export-targets.txt`](export-targets.txt) | the declarations to export |
 | [`verification/`](verification/NOTES.md) | our notes, and the results once there are some |
 
-## Status
-
-**No verdict yet.** Comparator has not run on the submission. It needs the whole project
-compiled first, which takes hours and is in progress.
-
-| Check | Result |
-|---|---|
-| The source is identical to the published tarball | pass (CI) |
-| The challenge compiles against Mathlib alone, and its export is reproducible | pass (CI) |
-| No `sorry`, `axiom`, `native_decide`, `unsafe`, `implemented_by` or `opaque` in the source | pass ([scan](verification/static-scan.txt)) |
-| All nine dependency pins are official upstream commits | pass ([notes](verification/NOTES.md#dependencies)) |
-| The steps below work on a Mathlib-sized test | pass ([notes](verification/NOTES.md#smoke-test)) |
-| **Comparator on the submission** | **not yet run** |
-
 ## What is claimed
 
 | Theorem in `Main.lean` | Statement |
