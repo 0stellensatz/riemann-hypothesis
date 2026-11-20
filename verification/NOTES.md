@@ -184,6 +184,12 @@ on one thread.
   - The exporter and the other tools in the work directory are rebuilt after the build.
   - Every compiled dependency file in the build folder is compared with a clean official copy.
     A first comparison during the build found all 121,742 files identical.
+- **Export.** The solution is exported inside a sandbox as well, with no network and the build
+  folder read-only. The exporter maps the build's `.olean` files straight into memory, and
+  `lake env` reads the folder's configuration, so both steps handle files the build could have
+  written. Only the export file leaves the sandbox, and the judge treats it as untrusted.
+- **After the build.** Nothing in the build folder is run or opened outside a sandbox. The
+  judge's config, the export targets and the challenge export come from the clean clone.
 - **Judge.** `lake comparator` runs the checkers inside its own bubblewrap sandbox, with no
   network. Since it is given exports, it builds nothing from the project.
 - **Standalone Comparator.** The archived standalone Comparator (tag `v4.33.0`) is the

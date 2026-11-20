@@ -31,21 +31,22 @@ does not include:
 ## Checking it
 
 ```bash
-# 1. Export the challenge. Clean clone, Lean v4.33.1.
+# 1. Export the challenge. Clean clone at $CLEAN, Lean v4.33.1.
+cd "$CLEAN"
 lake exe cache get
 lake build Challenge
 lake env lean4export Challenge -- $(cat export-targets.txt) > challenge.export
 
-# 2. Build the solution. Second clone, in a sandbox with no network. Takes hours.
-lake exe cache get      # before the network is cut
-lake build Main
+# 2. Build the solution. Second clone, inside a sandbox with no network. Takes hours.
+lake exe cache get      # before entering the sandbox
+lake build Main         # inside the sandbox
 
-# 3. Export the solution, from the second clone.
-lake env lean4export Main -- $(cat export-targets.txt) > solution.export
+# 3. Export the solution. Still inside the sandbox; only solution.export comes out.
+lake env lean4export Main -- $(cat "$CLEAN/export-targets.txt") > solution.export
 
-# 4. Judge. Lean v4.36.0, from an empty directory.
-lake comparator --config comparator.json \
-  --challenge-from-export challenge.export --solution-from-export solution.export
+# 4. Judge. Lean v4.36.0, from an empty directory, with the config from the clean clone.
+lake comparator --config "$CLEAN/comparator.json" \
+  --challenge-from-export "$CLEAN/challenge.export" --solution-from-export solution.export
 ```
 
 What to know before running it:
@@ -58,8 +59,12 @@ What to know before running it:
   where none of that code has been compiled. CI does step 1 on every push and publishes the
   result as the `challenge-export` artifact. Its sha256 is
   `bd484ac9886a96f26b1d9a7a59ebd45b7a70d102c015d4f31f9302bbdd6ab2b9`.
-- **Sandbox.** The build in step 2 must not be able to write to `challenge.export`, to the
-  exporter, or to the Lean `v4.36.0` toolchain.
+- **Sandbox.** Steps 2 and 3 both run in the sandbox. It has no network, sees the clean clone
+  read-only, and cannot write to the exporter or to the Lean `v4.36.0` toolchain.
+- **The second clone is hostile after step 2.** The build could have rewritten anything in
+  it: the lakefile, the config, the Git settings, the compiled files. So nothing in it is run
+  or opened outside the sandbox, including `lake` and `git`. The config, the export targets and
+  the challenge export all come from the clean clone.
 - **Checkers.** The judge does not trust the build. It re-checks the whole proof with Lean's
   kernel and the four checkers named in `comparator.json`, compares the statements with the
   challenge, and allows only the three standard axioms. `--paranoid` would add lean4lean, which
