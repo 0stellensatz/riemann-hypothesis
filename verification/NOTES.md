@@ -42,11 +42,29 @@ the import closure of `Main`.
 
 [`static-scan.txt`](static-scan.txt) is a text search over every file. It finds no `axiom`,
 `sorry`, `admit`, `native_decide`, `implemented_by`, `extern`, `unsafe`, `opaque`, `debug.*`
-option or `skipKernelTC`. All notation is `local` or `scoped`. The two uses of metaprogramming:
+option or `skipKernelTC`. All notation is `local` or `scoped`, and nothing in the source reads
+or writes files, starts processes or reads the environment.
+
+The source does use Lean's metaprogramming API in these places (corrected after
+[issue #2](https://github.com/Deicyde/riemann-hypothesis/issues/2); an earlier version of these
+notes listed only the first two):
 
 - `BuildAid/D1.lean` … `D5.lean` each add one name to Lean's deny list for library suggestions.
-- `Formalism/HermitianCurvature/HermitianCurvatureProofs/CutCptCopy.lean` copies declarations
-  under new names with `addDecl`, so the kernel checks every copy.
+- `Formalism/HermitianCurvature/HermitianCurvatureProofs/CutCptCopy.lean` defines a command that
+  copies declarations under new names with `addDecl`, so the kernel checks every copy.
+- `Formalism/LocalToGlobal/IndefiniteReal/HeckeNonvanishing/Imports.lean` defines the tactic
+  `kexactB`, which elaborates a term and assigns it to the goal without the elaborator checking
+  that its type matches. It is used, through small macros, in 67 files.
+- `Formalism/LocalToGlobal/NumberFieldFamilies/OwnStruct.lean` defines the tactic `kcopy` and
+  the command `#kcopy_probe`, which rebuild a term field by field and assign it the same way.
+- `run_tac` appears 33 times: 31 revert all hypotheses before an `exact`, and two are short
+  blocks, one of which assigns a hypothesis to the goal directly.
+- One `@[positivity]` extension, in `…/TotientGaloisClasses/EvalFrameOrd.lean`.
+
+For proofs made with `kexactB`, `kcopy` or a direct assignment, the elaborator has not checked
+the term against the goal, so the kernel is the only check. That is sound, because the kernel
+checks every declaration, and it is the reason this repository re-checks the exported proof with
+independent kernels.
 
 A text search is not a proof. The axiom check and kernel replay in Comparator are.
 
