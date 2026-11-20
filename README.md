@@ -29,6 +29,8 @@ does not include:
 ## Checking it
 
 ```bash
+export LEAN_ABORT_ON_PANIC=1   # as Comparator sets it: stop on an internal error, don't continue
+
 # 1. Export the challenge. Clean clone at $CLEAN, Lean v4.33.1.
 cd "$CLEAN"
 lake exe cache get

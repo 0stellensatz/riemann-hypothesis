@@ -39,6 +39,8 @@ jobs:
   challenge:
     name: Challenge compiles against Mathlib alone
     runs-on: ubuntu-latest
+    env:
+      LEAN_ABORT_ON_PANIC: "1"   # as Comparator sets it for builds and exports
     steps:
       - uses: actions/checkout@v4
       - name: Install elan
