@@ -86,37 +86,101 @@ Each pin in `lake-manifest.json` was compared with its repository on GitHub.
 To repeat the Mathlib check: `git diff --stat db584cd6d46c 0df444a360ea` in a Mathlib clone shows
 only `lean-toolchain`, and `git merge-base --is-ancestor db584cd6d46c origin/master` succeeds.
 
+## Lean version
+
+The project is pinned to Lean `v4.33.1` (2026-08-21). Where that sits among this year's kernel
+fixes, from Lean's release notes and issue tracker:
+
+- **Included.** The fix for [#14576](https://github.com/leanprover/lean4/issues/14576)
+  (wrong-structure projections giving an axiom-free proof of `False`; fixed in 4.32.2 and
+  4.33.0), the other kernel soundness fixes of 4.33.0, and the fixes 4.33.1 itself backported:
+  the `is_def_eq` cache (#14806), `is_prop` (#14807), non-uniform inductive occurrences
+  (#14582), a reference-count overflow that could become a use-after-free in the kernel
+  (#14838), and the requirement of GMP 6.3.0 (#14833).
+- **Not included.** The runtime fixes of 4.34.1: #15241 and #15289, which the release notes say
+  could potentially be turned into a proof of `False` in the official kernel with deliberately
+  constructed input, and #15288. The notes say kernels not built on the Lean runtime are
+  unaffected. Also not included: the `leanchecker` fixes #15100 and #15101, and #16489, which was
+  fixed one day after 4.36.0.
+
+For this reason a pass by the 4.33.1 kernel alone, which is what a successful build is, counts
+as limited evidence here. The judging is done by Lean 4.36.0 and independent checkers.
+
 ## Tools
 
-| Tool | Revision | Built with |
+| Tool | Revision | Role |
 |---|---|---|
-| [comparator](https://github.com/leanprover/comparator) | tag `v4.33.0` (`3927ad38`) | Lean `v4.33.1` |
-| [lean4export](https://github.com/leanprover/lean4export) | tag `v4.33.0` (`15f6055e`), the revision Comparator pins | Lean `v4.33.1` |
-| [landrun](https://github.com/Zouuup/landrun) | `main` (`ec104f6e`) | Go |
-| [nanoda_lib](https://github.com/ammkrn/nanoda_lib) | `0da9f98f` | Rust, `cargo build --release` |
+| Lean `v4.33.1` | official release | builds the project |
+| [lean4export](https://github.com/leanprover/lean4export) | tag `v4.33.0` (`15f6055e`), built with Lean `v4.33.1` | writes the two exports |
+| Lean `v4.36.0` | official release | `lake comparator`, its kernel, and the bundled `leanchecker-paranoid`, `nanoda_bin`, `con-leche`, `con-ron` |
+| bubblewrap | Debian `0.12.0` | the sandbox `lake comparator` requires |
+| [lean4lean](https://github.com/digama0/lean4lean) | `master` (`67f63b0c`), built with Lean `v4.33.1` | sixth checker, run separately |
 
-Comparator and lean4export carry a `v4.33.0` toolchain file. They are built with `v4.33.1`
-because Lean refuses `.olean` files written by a different Lean build, and lean4export has to
-read the project's.
+lean4export carries a `v4.33.0` toolchain file. It is built with `v4.33.1` because Lean refuses
+`.olean` files written by a different Lean build, and it has to read the project's. Both Lean
+toolchains on our machine were compared file by file with the official release archives.
+
+## Smoke test
+
+Before the real run, the route in the README was tested on a Mathlib-sized example: a solution
+on Lean `v4.33.1` and the same Mathlib pin, proving four small statements (`zeta_two`,
+`zeta_ne_zero`, `exp_pos'` and `sqrt_two_irrational`). Its export has 54,461 declarations and is 371 MB.
+
+| Checker (Lean `v4.36.0`) | Verdict | Time | Peak memory |
+|---|---|---|---|
+| Lean kernel | accepts | 70 s | 0.75 GB |
+| Lean paranoid (`leanchecker-paranoid`) | accepts | 81 s | 0.78 GB |
+| nanoda | accepts | 14 s | 0.41 GB |
+| con-leche | accepts | 15 s | 1.05 GB |
+| con-ron | accepts | 27 s | 1.47 GB |
+| lean4lean (only with `--paranoid`) | rejects: `unknown constant 'Decidable.intro'` | 11 s | 0.68 GB |
+
+With the four checkers named in the config, `lake comparator` exits 0 with "Your solution is
+okay!". With `--paranoid` it exits 1, on lean4lean alone. On a small test project, a wrong
+statement, a `sorry` and an extra axiom were each rejected before any kernel ran, and a proof
+swapped inside the export was rejected by every kernel.
+
+## lean4lean
+
+Lean 4.36's lean4lean cannot read a 4.33.1 export, so lean4lean `master` is built with Lean
+`v4.33.1` and replays the compiled `.olean` files directly:
+
+```bash
+lake env lean4lean --fresh Main
+```
+
+This checker reads the build's output files, not the export the other five judge.
 
 ## Sandbox
 
-Comparator's README runs it under `systemd-run --property=RestrictAddressFamilies=~AF_UNIX` and
-relies on landrun for the rest. On our machine (Linux 6.12) that left two gaps:
+- **Build.** The build runs in a rootless podman container with no network, a read-only root
+  filesystem, all capabilities dropped, and the Lean toolchain mounted read-only:
 
-- **Network.** landrun's README says UDP restrictions need Linux 7.2 or later. Inside landrun
-  alone, TCP was blocked but DNS lookups and UDP sends succeeded.
-- **Files.** Comparator gives the build read access to the whole filesystem, which includes the
-  home directory of the user running it.
+  ```bash
+  nice -n 10 podman run --rm -i --network none --read-only --tmpfs /tmp:rw,size=64g \
+    --userns=keep-id --security-opt no-new-privileges --cap-drop all --memory 440g \
+    -v "$WORK":"$WORK":rw \
+    -v "$HOME/.elan/toolchains/leanprover--lean4---v4.33.1":/opt/lean:ro \
+    -e HOME=/tmp/home -e PATH=/opt/lean/bin:/usr/bin:/bin \
+    -w "$WORK/proj/lean" --name rhcheck-build \
+    rhcheck-sandbox:1 bash -c 'mkdir -p $HOME; lake build Main'
+  ```
 
-The command in the README closes both with systemd: `PrivateNetwork=yes` removes the network,
-and `ProtectHome=tmpfs` with the three bind paths leaves only the project, the Lean toolchain and
-the tools visible under the home directory. With these flags, all network access failed in our
-tests and Comparator's own 14 tests passed.
+  `rhcheck-sandbox:1` is `debian:trixie-slim` plus `git`, `ca-certificates` and `procps`.
+  The container can write to the whole work directory, which holds the compiled dependencies.
+  After the build, every compiled dependency file is therefore compared with a clean official
+  copy, and the checking tools are rebuilt.
+- **Judge.** `lake comparator` runs the checkers inside its own bubblewrap sandbox, with no
+  network. Since it is given exports, it builds nothing from the project.
+- **Standalone Comparator.** The archived standalone Comparator (tag `v4.33.0`) is the
+  fallback. Its documented sandbox, landrun under `systemd-run`, left two gaps on Linux 6.12:
+  landrun cannot restrict UDP before Linux 7.2, so DNS lookups and UDP sends succeeded, and the
+  build could read the whole home directory. Running it with `PrivateNetwork=yes` and
+  `ProtectHome=tmpfs` closes both.
 
 ## Building
 
-- On our machine the build is on course for 5 to 7 hours and about 86 GB of outputs.
+- On our machine (48 cores, 503 GB of RAM) the build is on course for 7 to 10 hours.
 - Lake writes a `.setup.json` file per module that lists the module's whole import closure. In
   this project they average about 6 MB, which over 175,187 modules is around a terabyte. A
   module's file is not needed once the module is built, and deleting it leaves the build up to
@@ -131,10 +195,11 @@ tests and Comparator's own 14 tests passed.
   done
   ```
 
-- Comparator's README assumes the solution was never compiled outside its sandbox, so start
-  from a fresh clone.
+- Estimates for the real run, scaled from the smoke test and uncertain by a factor of 2 to 3:
+  about 3.2 million declarations, a solution export of 70 to 75 GB, and about 12 hours for the
+  five checkers in sequence, with a peak of roughly 285 GB of memory in con-ron.
 
 ## Results
 
-The Comparator run is in progress. Its output, the exact command line and the machine details
-will be added to this folder.
+The build is in progress. The exports' checksums, Comparator's output, the exact command lines
+and the machine details will be added to this folder.

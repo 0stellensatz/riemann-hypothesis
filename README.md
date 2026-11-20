@@ -22,7 +22,8 @@ Everything else we wrote is in [`verification/`](verification/NOTES.md).
 | Challenge compiles against Mathlib alone | pass (CI) |
 | No `sorry`, `axiom`, `native_decide`, `unsafe`, `implemented_by` or `opaque` in the source | pass ([scan](verification/static-scan.txt)) |
 | All nine dependency pins are official upstream commits | pass ([notes](verification/NOTES.md#dependencies)) |
-| **Comparator** (statements match, axioms, kernel replay, nanoda) | **running**; the build takes hours |
+| The Comparator route below, on a Mathlib-sized test | pass ([notes](verification/NOTES.md#smoke-test)) |
+| **Comparator on the submission** | **not yet run**; the build is in progress and takes hours |
 
 ## The statements
 
@@ -39,39 +40,61 @@ use four short definitions that `Challenge.lean` copies from the submission's `S
 
 ## Running Comparator
 
-The project is on Lean `v4.33.1`. `lake comparator` and its paranoid mode need Lean 4.35 or
-later, so this uses the standalone Comparator at its `v4.33.0` tag. With the
-[tools](verification/NOTES.md#tools) built under `$TOOLS`, this is the command we run from the
-repository root:
+The project is pinned to Lean `v4.33.1`, and `lake comparator` exists only from Lean 4.35. So
+the check has three steps: build with the project's own Lean, export the challenge and the
+solution, and judge the two exports with Lean `v4.36.0`.
+
+**1. Build**, with Lean `v4.33.1`, in a sandbox with no network (hours; read
+[the build notes](verification/NOTES.md#building) first):
 
 ```bash
-lake exe cache get    # Mathlib's official build cache; the only step that needs the network
-
-TC=$HOME/.elan/toolchains/leanprover--lean4---v4.33.1/bin
-systemd-run --user --pipe --wait --collect \
-  --property=RestrictAddressFamilies=~AF_UNIX \
-  -p PrivateNetwork=yes -p ProtectSystem=strict -p ProtectHome=tmpfs \
-  -p BindPaths="$PWD" -p BindReadOnlyPaths="$HOME/.elan" -p BindReadOnlyPaths="$TOOLS" \
-  -p PrivateTmp=yes -p NoNewPrivileges=yes \
-  --working-directory="$PWD" \
-  -E PATH="$TC:/usr/bin:/bin" -E HOME="$HOME" \
-  -E COMPARATOR_LANDRUN="$TOOLS/landrun/landrun" \
-  -E COMPARATOR_LEAN4EXPORT="$TOOLS/comparator/.lake/packages/lean4export/.lake/build/bin/lean4export" \
-  -E COMPARATOR_NANODA="$TOOLS/nanoda_lib/target/release/nanoda_bin" \
-  "$TC/lake" env "$TOOLS/comparator/.lake/build/bin/comparator" comparator.json
+lake exe cache get          # Mathlib's official build cache; needs the network
+lake build Main Challenge
 ```
 
-The first line of flags is the invocation from Comparator's README. The `-p` flags are extra
-isolation; [the notes](verification/NOTES.md#sandbox) say why they are needed. Comparator
-compiles all 175,187 files itself, which takes hours and about 100 GB of disk; read
-[the build notes](verification/NOTES.md#building) first.
+**2. Export**, with [lean4export](https://github.com/leanprover/lean4export) at tag `v4.33.0`,
+built with Lean `v4.33.1`:
+
+```bash
+THEOREMS="riemannHypothesis riemannZeta_eq_zero_re LFunction_ne_zero_of_half_lt_re LFunction_eq_zero_re LFunction_eq_zero_re_of_isPrimitive"
+PRELUDE="propext Quot.sound Classical.choice Nat.add Nat.sub Nat.mul Nat.pow Nat.gcd Nat.div Nat.mod Nat.beq Nat.ble Nat.land Nat.lor Nat.xor Nat.shiftLeft Nat.shiftRight String.ofList Char.ofNat List eagerReduce Nat String String.mk Char optParam autoParam semiOutParam outParam"
+
+lake env lean4export Challenge -- Quot Quot.mk Quot.lift Quot.ind $THEOREMS $PRELUDE > challenge.export
+lake env lean4export Main      -- Quot Quot.mk Quot.lift Quot.ind $THEOREMS $PRELUDE > solution.export
+```
+
+**3. Judge**, with the official Lean `v4.36.0` toolchain on `PATH`, from an empty directory:
+
+```bash
+lake comparator --config comparator.json \
+  --challenge-from-export challenge.export --solution-from-export solution.export
+```
+
+Comparator checks that the five statements match, that the proofs use only the three permitted
+axioms, and that the proof is accepted by Lean's kernel and by the four checkers named in
+`comparator.json`: Lean paranoid, nanoda, con-leche and con-ron.
+
+### Why not `--paranoid`
+
+`lake comparator --paranoid` runs those same four checkers plus lean4lean. Lean 4.36's lean4lean
+rejects every export made by Lean 4.33.1 with `unknown constant 'Decidable.intro'`, because
+4.36 redefined `Decidable` in the core library. The flag therefore fails on this project
+whatever the proof contains. `comparator.json` names the other four checkers directly, and
+lean4lean is run separately, built with Lean `v4.33.1`
+([notes](verification/NOTES.md#lean4lean)).
 
 ## Limits
 
 - Comparator checks the challenge and the solution against the same Mathlib, so it cannot
   detect a modified Mathlib. The pin here is Mathlib's official `v4.33.1` tag.
-- A passing run still trusts the Lean kernel and nanoda, Mathlib's definitions, Mathlib's
-  official build cache, and the sandbox.
+- The exports are made by Lean 4.33.1 and judged by Lean 4.36.0. Lean's help text lists exports
+  made elsewhere as an intended use, and the export format version is the same (3.1.0), but
+  this is not the common path.
+- Lean 4.33.1 predates several kernel and runtime fixes
+  ([notes](verification/NOTES.md#lean-version)), which is why the judging uses 4.36.0 and
+  independent checkers.
+- A passing run still trusts the checkers, Mathlib's definitions, Mathlib's official build
+  cache, the exporter, and the sandboxes.
 
 ## License
 

@@ -9,5 +9,10 @@
     "LFunction_eq_zero_re_of_isPrimitive"
   ],
   "permitted_axioms": ["propext", "Quot.sound", "Classical.choice"],
-  "enable_nanoda": true
+  "external_kernels": {
+    "Lean paranoid": ["leanchecker-paranoid", "--silent", "--from-export"],
+    "nanoda": ["nanoda_bin"],
+    "con-leche": ["con-leche"],
+    "con-ron": ["con-ron"]
+  }
 }
