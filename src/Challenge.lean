@@ -1,19 +1,5 @@
 import Mathlib
 
-/-!
-# Comparator challenge for the submission's `Main`
-
-This file is not part of the submission. It imports only Mathlib, so these statements are
-elaborated without any of the submission's 175,187 files in scope.
-
-`riemannHypothesis` uses Mathlib's own `RiemannHypothesis`. The other four theorems are stated
-with definitions copied character for character from the submission's `src/Statements.lean`,
-because its `Main` uses them. Comparator requires the solution's definitions to match these.
-
-Comparator checks the challenge and solution against the same Mathlib, so the Mathlib pin was
-checked separately: it is Mathlib's official `v4.33.1` tag (see `verification/NOTES.md`).
--/
-
 def RiemannZetaZerosOnLine : Prop :=
   ∀ s : ℂ, riemannZeta s = 0 → (¬∃ n : ℕ, s = -2 * ((n : ℂ) + 1)) → s ≠ 1 → s.re = 1 / 2
 
