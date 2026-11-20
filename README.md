@@ -57,16 +57,6 @@ What to know before running it:
   where none of that code has been compiled. CI does step 1 on every push and publishes the
   result as the `challenge-export` artifact. Its sha256 is
   `bd484ac9886a96f26b1d9a7a59ebd45b7a70d102c015d4f31f9302bbdd6ab2b9`.
-- **Sandbox.** Steps 2 and 3 both run in the sandbox. It has no network, sees the clean clone
-  read-only, and cannot write to the exporter or to the Lean `v4.36.0` toolchain.
-- **The second clone is hostile after step 2.** The build could have rewritten anything in
-  it: the lakefile, the config, the Git settings, the compiled files. So nothing in it is run
-  or opened outside the sandbox, including `lake` and `git`. The config, the export targets and
-  the challenge export all come from the clean clone.
-- **Checkers.** The judge does not trust the build. It re-checks the whole proof with Lean's
-  kernel and the four checkers named in `comparator.json`, compares the statements with the
-  challenge, and allows only the three standard axioms. `--paranoid` would add lean4lean, which
-  cannot read exports made by Lean 4.33.1, so lean4lean is run separately.
 - **Cost.** Hours on a large machine, about 100 GB of disk, and a lot of memory for step 4.
 
 The [notes](verification/NOTES.md) have the details: where the source came from, the Lean
