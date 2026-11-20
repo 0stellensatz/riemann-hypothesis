@@ -26,8 +26,6 @@ does not include:
 | `LFunction_eq_zero_re` | every zero of L(χ, s) with 0 < Re s < 1 has Re s = 1/2 |
 | `LFunction_eq_zero_re_of_isPrimitive` | the same, for primitive characters |
 
-"GRH" here means Dirichlet L-functions only.
-
 ## Checking it
 
 ```bash
