@@ -41,34 +41,60 @@ use four short definitions that `Challenge.lean` copies from the submission's `S
 ## Running Comparator
 
 The project is pinned to Lean `v4.33.1`, and `lake comparator` exists only from Lean 4.35. So
-the check has three steps: build with the project's own Lean, export the challenge and the
-solution, and judge the two exports with Lean `v4.36.0`.
+the check is done in four steps, with the project's own Lean for building and exporting and
+Lean `v4.36.0` for judging.
 
-**1. Build**, with Lean `v4.33.1`, in a sandbox with no network (hours; read
-[the build notes](verification/NOTES.md#building) first):
+The order matters. Compiling the submission runs its code, and that code can write to the
+folder it is built in, including the compiled Mathlib. The challenge is therefore exported
+first, in a clean clone where none of the submission's code has been compiled, and the
+submission is built somewhere else. This is the order Comparator itself uses.
 
-```bash
-lake exe cache get          # Mathlib's official build cache; needs the network
-lake build Main Challenge
-```
-
-**2. Export**, with [lean4export](https://github.com/leanprover/lean4export) at tag `v4.33.0`,
-built with Lean `v4.33.1`:
+The exporter is [lean4export](https://github.com/leanprover/lean4export) at tag `v4.33.0`,
+built with Lean `v4.33.1`. Both exports use the same arguments:
 
 ```bash
 THEOREMS="riemannHypothesis riemannZeta_eq_zero_re LFunction_ne_zero_of_half_lt_re LFunction_eq_zero_re LFunction_eq_zero_re_of_isPrimitive"
 PRELUDE="propext Quot.sound Classical.choice Nat.add Nat.sub Nat.mul Nat.pow Nat.gcd Nat.div Nat.mod Nat.beq Nat.ble Nat.land Nat.lor Nat.xor Nat.shiftLeft Nat.shiftRight String.ofList Char.ofNat List eagerReduce Nat String String.mk Char optParam autoParam semiOutParam outParam"
-
-lake env lean4export Challenge -- Quot Quot.mk Quot.lift Quot.ind $THEOREMS $PRELUDE > challenge.export
-lake env lean4export Main      -- Quot Quot.mk Quot.lift Quot.ind $THEOREMS $PRELUDE > solution.export
 ```
 
-**3. Judge**, with the official Lean `v4.36.0` toolchain on `PATH`, from an empty directory:
+**1. Export the challenge**, in a clean clone. `Challenge.lean` imports only Mathlib, so this
+compiles none of the submission:
+
+```bash
+lake exe cache get          # Mathlib's official build cache; needs the network
+lake build Challenge
+lake env lean4export Challenge -- Quot Quot.mk Quot.lift Quot.ind $THEOREMS $PRELUDE > challenge.export
+```
+
+CI runs this step on every push and publishes the file and its sha256 as the
+`challenge-export` artifact of the
+[checks workflow](https://github.com/Deicyde/riemann-hypothesis/actions/workflows/checks.yml),
+so the challenge side does not have to be taken on trust from whoever runs the rest.
+
+**2. Build the solution**, in a second clone, inside a sandbox with no network (hours; read
+[the build notes](verification/NOTES.md#building) first). The sandbox must not be able to
+write to `challenge.export`, to the exporter, or to the Lean `v4.36.0` toolchain:
+
+```bash
+lake exe cache get          # before the network is cut
+lake build Main
+```
+
+**3. Export the solution**, from that second clone:
+
+```bash
+lake env lean4export Main -- Quot Quot.mk Quot.lift Quot.ind $THEOREMS $PRELUDE > solution.export
+```
+
+**4. Judge**, with the official Lean `v4.36.0` toolchain on `PATH`, from an empty directory:
 
 ```bash
 lake comparator --config comparator.json \
   --challenge-from-export challenge.export --solution-from-export solution.export
 ```
+
+The judge does not trust the build. It re-checks every declaration of the solution export, and
+it compares the solution's statements, and the definitions they use, with the challenge export.
 
 Comparator checks that the five statements match, that the proofs use only the three permitted
 axioms, and that the proof is accepted by Lean's kernel and by the four checkers named in

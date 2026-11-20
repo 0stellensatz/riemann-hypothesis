@@ -169,9 +169,17 @@ on one thread.
   ```
 
   `rhcheck-sandbox:1` is `debian:trixie-slim` plus `git`, `ca-certificates` and `procps`.
-  The container can write to the whole work directory, which holds the compiled dependencies.
-  After the build, every compiled dependency file is therefore compared with a clean official
-  copy, and the checking tools are rebuilt.
+- **What the build could reach.** Compiling the submission runs its code. In our run the
+  container could write to the whole work directory, which holds the compiled Mathlib, the
+  exporter and scratch projects. It could not see the Lean `v4.36.0` toolchain that judges, and
+  the `v4.33.1` toolchain was read-only. Three things follow from that:
+  - The challenge export given to the judge is made in a new folder, created after the
+    container has exited, from a fresh clone and a fresh download of Mathlib's official cache.
+    A build that altered the compiled Mathlib in its own folder cannot change what the
+    challenge means. CI's `challenge-export` artifact is a second, independent copy.
+  - The exporter and the other tools in the work directory are rebuilt after the build.
+  - Every compiled dependency file in the build folder is compared with a clean official copy.
+    A first comparison during the build found all 121,742 files identical.
 - **Judge.** `lake comparator` runs the checkers inside its own bubblewrap sandbox, with no
   network. Since it is given exports, it builds nothing from the project.
 - **Standalone Comparator.** The archived standalone Comparator (tag `v4.33.0`) is the
