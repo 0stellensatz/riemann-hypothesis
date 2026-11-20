@@ -112,9 +112,9 @@ as limited evidence here. The judging is done by Lean 4.36.0 and independent che
 |---|---|---|
 | Lean `v4.33.1` | official release | builds the project |
 | [lean4export](https://github.com/leanprover/lean4export) | tag `v4.33.0` (`15f6055e`), built with Lean `v4.33.1` | writes the two exports |
-| Lean `v4.36.0` | official release | `lake comparator`, its kernel, and the bundled `leanchecker-paranoid`, `nanoda_bin`, `con-leche`, `con-ron` |
+| Lean `v4.36.0` | official release | `lake comparator`, its kernel, and the bundled `leanchecker-paranoid` and `nanoda_bin` |
 | bubblewrap | Debian `0.12.0` | the sandbox `lake comparator` requires |
-| [lean4lean](https://github.com/digama0/lean4lean) | `master` (`67f63b0c`), built with Lean `v4.33.1` | sixth checker, run separately |
+| [lean4lean](https://github.com/digama0/lean4lean) | `master` (`67f63b0c`), built with Lean `v4.33.1` | a further checker, run separately |
 
 lean4export carries a `v4.33.0` toolchain file. It is built with `v4.33.1` because Lean refuses
 `.olean` files written by a different Lean build, and it has to read the project's. Both Lean
@@ -135,25 +135,41 @@ on Lean `v4.33.1` and the same Mathlib pin, proving four small statements (`zeta
 | con-ron | accepts | 27 s | 1.47 GB |
 | lean4lean (only with `--paranoid`) | rejects: `unknown constant 'Decidable.intro'` | 11 s | 0.68 GB |
 
-With the four checkers named in the config, `lake comparator` exits 0 with "Your solution is
-okay!". With `--paranoid` it exits 1, on lean4lean alone. On a small test project, a wrong
+With Lean paranoid, nanoda, con-leche and con-ron named in the config, `lake comparator` exits 0
+with "Your solution is okay!". With `--paranoid` it exits 1, on lean4lean alone. On a small test project, a wrong
 statement, a `sorry` and an extra axiom were each rejected before any kernel ran, and a proof
 swapped inside the export was rejected by every kernel.
 
+## Checkers
+
+`lake comparator --paranoid` adds five checkers to Lean's kernel: Lean paranoid, nanoda,
+con-leche, con-ron and lean4lean. Three of them cannot check this project, for reasons that
+have nothing to do with whether the proof is right, and `lake comparator` counts any non-zero
+exit from a checker as a rejection. So `comparator.json` names only Lean paranoid and nanoda.
+
+- **con-leche and con-ron** refuse reflexive inductive types. The submission has one in the
+  proof's dependencies: `FunctorialResolution.EmbeddedResolution.PrincipalizationCertificate`
+  has a constructor argument `hcert : ∀ z hz, PrincipalizationCertificate …`, a function into
+  the type being defined. An independent run (Andrew Sutherland, on the Lean Zulip) reports
+  that both exit 2 on the real export, in `--verified` and `--trusted` modes, with
+  `in-process model of …PrincipalizationCertificate: reflexive member`. They did accept the
+  Mathlib-sized smoke test above.
+- **lean4lean** from Lean 4.36 rejects every export made by Lean 4.33.1 with
+  `unknown constant 'Decidable.intro'`, because 4.36 redefined `Decidable` in the core library.
+
+That leaves two independent kernel designs judging the export: Lean's own, run both normally
+and as the hardened build, and nanoda.
+
 ## lean4lean
 
-`lake comparator --paranoid` runs the four checkers named in `comparator.json` plus lean4lean.
-Lean 4.36's lean4lean rejects every export made by Lean 4.33.1 with
-`unknown constant 'Decidable.intro'`, because 4.36 redefined `Decidable` in the core library.
-The flag therefore fails on this project whatever the proof contains. So `comparator.json`
-names the other four checkers directly, and lean4lean `master` is built with Lean `v4.33.1`
-and replays the compiled `.olean` files:
+lean4lean `master`, built with Lean `v4.33.1`, replays the compiled `.olean` files as a third
+design:
 
 ```bash
 lake env lean4lean --fresh Main
 ```
 
-This checker reads the build's output files, not the export the other five judge.
+This checker reads the build's output files, not the export the others judge.
 On the Mathlib-sized smoke test it accepted all 750,225 declarations it replayed, in 37 minutes
 on one thread.
 
@@ -215,9 +231,14 @@ on one thread.
   done
   ```
 
-- Estimates for the real run, scaled from the smoke test and uncertain by a factor of 2 to 3:
-  about 3.2 million declarations, a solution export of 70 to 75 GB, and about 12 hours for the
-  five checkers in sequence, with a peak of roughly 285 GB of memory in con-ron.
+- An independent run (Andrew Sutherland, on the Lean Zulip) reports a solution export of
+  61,570,595,788 bytes with these export targets, sha256
+  `5ea74b912147c5c93cc2b6d70cc727cf908df2f62ac6a20480a3fa02f6be244e`. The exporter took about
+  1 h 20 min on one thread and peaked at 163 GB of memory. If the export is deterministic, any
+  other build of this repository should produce the same checksum.
+- Our estimate for the kernels, scaled from the smoke test and uncertain by a factor of 2 to 3:
+  roughly 4 hours each for Lean's kernel and the hardened build at about 150 GB of memory, and
+  under an hour for nanoda.
 
 ## Limits
 
