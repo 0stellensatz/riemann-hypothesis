@@ -9,5 +9,5 @@
     "LFunction_eq_zero_re_of_isPrimitive"
   ],
   "permitted_axioms": ["propext", "Quot.sound", "Classical.choice"],
-  "enable_nanoda": false
+  "enable_nanoda": true
 }

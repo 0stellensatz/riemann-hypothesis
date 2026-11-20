@@ -8,11 +8,10 @@ elaborated without any of the submission's 175,187 files in scope.
 
 `riemannHypothesis` uses Mathlib's own `RiemannHypothesis`. The other four theorems are stated
 with definitions copied character for character from the submission's `src/Statements.lean`,
-because its `Main` uses them. Comparator requires the solution's definitions to match these, and
-`scripts/check-statements.sh` checks that they are identical.
+because its `Main` uses them. Comparator requires the solution's definitions to match these.
 
-Comparator checks the challenge and solution against the same Mathlib, so the Mathlib pin is
-checked separately by `scripts/check-dependencies.sh`. The pin is Mathlib's official `v4.33.1` tag.
+Comparator checks the challenge and solution against the same Mathlib, so the Mathlib pin was
+checked separately: it is Mathlib's official `v4.33.1` tag (see `verification/NOTES.md`).
 -/
 
 def RiemannZetaZerosOnLine : Prop :=

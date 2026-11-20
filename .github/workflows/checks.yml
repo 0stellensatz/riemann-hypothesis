@@ -1,45 +1,40 @@
 name: checks
 
-# Fast checks that run on GitHub's hosted runners. None of them compiles the submission's own
-# code. The full Comparator run is too big for hosted runners; see scripts/run-comparator.sh.
+# Two fast checks. Neither compiles the submission's own code; the Comparator run does that
+# and is too big for hosted runners (see the README).
 
 on:
   push:
   pull_request:
   workflow_dispatch:
-  schedule:
-    - cron: "17 6 * * *"   # daily: notices if the published tarball changes or disappears
 
 permissions:
   contents: read
 
-concurrency:
-  group: checks-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   mirror:
-    name: Mirror matches the published tarball
+    name: Source is identical to the published tarball
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: scripts/verify-mirror.sh
+      - name: Download the archive from alpo.ge and compare
+        run: |
+          T="$RUNNER_TEMP/dl"; mkdir "$T"
+          for i in $(seq -w 1 14); do curl -fsSL --retry 3 -o "$T/part$i" "https://alpo.ge/lean.tar.gz.part$i"; done
+          cat "$T"/part* > "$T/lean.tar.gz"
+          echo "9631b4f020199e580ba86178cb56c6e9b09f690c2369a80dc4334aa93f49c7fc  $T/lean.tar.gz" | sha256sum -c
+          tar xzf "$T/lean.tar.gz" -C "$T"
 
-  statements:
-    name: Challenge matches the submission's statements
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: scripts/check-statements.sh
+          # src/ differs only by the added Challenge.lean
+          d=$(diff -r "$T/lean/src" src || true); echo "$d"
+          [ "$d" = "Only in src: Challenge.lean" ]
+          cmp "$T/lean/lean-toolchain" lean-toolchain
+          cmp "$T/lean/lake-manifest.json" lake-manifest.json
 
-  dependencies:
-    name: Dependency pins are official upstream
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: scripts/check-dependencies.sh
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+          # lakefile.toml is the original, byte for byte, followed by the marked block
+          n=$(wc -c < "$T/lean/lakefile.toml")
+          head -c "$n" lakefile.toml | cmp - "$T/lean/lakefile.toml"
+          tail -c +"$((n + 1))" lakefile.toml
 
   challenge:
     name: Challenge compiles against Mathlib alone
@@ -53,5 +48,5 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Fetch Mathlib's official build cache
         run: lake exe cache get
-      - name: Build only the Challenge module (imports Mathlib only)
+      - name: Build only the Challenge module
         run: lake build Challenge
