@@ -41,6 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       LEAN_ABORT_ON_PANIC: "1"   # as Comparator sets it for builds and exports
+      MATHLIB_CACHE_GET_URL: https://cache.mathlib.org/mathlib4   # Mathlib's current cache server
     steps:
       - uses: actions/checkout@v4
       - name: Install elan

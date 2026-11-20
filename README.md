@@ -30,6 +30,7 @@ does not include:
 
 ```bash
 export LEAN_ABORT_ON_PANIC=1   # as Comparator sets it: stop on an internal error, don't continue
+export MATHLIB_CACHE_GET_URL=https://cache.mathlib.org/mathlib4   # Mathlib's current cache server
 
 # 1. Export the challenge. Clean clone at $CLEAN, Lean v4.33.1.
 cd "$CLEAN"
