@@ -147,13 +147,16 @@ con-leche, con-ron and lean4lean. Three of them cannot check this project, for r
 have nothing to do with whether the proof is right, and `lake comparator` counts any non-zero
 exit from a checker as a rejection. So `comparator.json` names only Lean paranoid and nanoda.
 
-- **con-leche and con-ron** refuse reflexive inductive types. The submission has one in the
-  proof's dependencies: `FunctorialResolution.EmbeddedResolution.PrincipalizationCertificate`
-  has a constructor argument `hcert : ∀ z hz, PrincipalizationCertificate …`, a function into
-  the type being defined. An independent run (Andrew Sutherland, on the Lean Zulip) reports
+- **con-leche and con-ron** refuse a mutual inductive block that has a reflexive member. The
+  submission has one in the proof's dependencies:
+  `FunctorialResolution.EmbeddedResolution.PrincipalizationCertificate`, declared mutually with
+  `OrderCertificate`, has a constructor argument `hcert : ∀ z hz, PrincipalizationCertificate …`,
+  a function into the type being defined. An independent run (Andrew Sutherland, on the Lean Zulip) reports
   that both exit 2 on the real export, in `--verified` and `--trusted` modes, with
-  `in-process model of …PrincipalizationCertificate: reflexive member`. They did accept the
-  Mathlib-sized smoke test above.
+  `in-process model of …PrincipalizationCertificate: reflexive member`. We reproduced this on
+  a small project with a mutual reflexive pair: both exit 2 with the same message, which makes
+  `lake comparator` exit 1, while Lean's kernel, Lean paranoid and nanoda accept. They did
+  accept the Mathlib-sized smoke test above, and a non-mutual reflexive inductive.
 - **lean4lean** from Lean 4.36 rejects every export made by Lean 4.33.1 with
   `unknown constant 'Decidable.intro'`, because 4.36 redefined `Decidable` in the core library.
 
