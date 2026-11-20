@@ -12,8 +12,8 @@ Comparator's output will be added here when the run finishes.
 | Joined archive | `cat lean.tar.gz.part{01..14} > lean.tar.gz`: 239,275,554 bytes, sha256 `9631b4f020199e580ba86178cb56c6e9b09f690c2369a80dc4334aa93f49c7fc` |
 
 The first commit of this repository, `40e56bab`, is the archive's `lean/` directory exactly as
-published. Later commits add only `src/Challenge.lean`, `comparator.json`, a marked block at the
-end of `lakefile.toml` that registers the `Challenge` library, the README, this folder and the CI
+published. Later commits add only `src/Challenge.lean`, `comparator.json`, `export-targets.txt`, a marked
+block at the end of `lakefile.toml` that registers the `Challenge` library, the README, this folder and the CI
 workflow. `git diff 40e56bab HEAD --stat` shows this, and CI downloads the archive again and
 compares it with the tree.
 
@@ -142,8 +142,12 @@ swapped inside the export was rejected by every kernel.
 
 ## lean4lean
 
-Lean 4.36's lean4lean cannot read a 4.33.1 export, so lean4lean `master` is built with Lean
-`v4.33.1` and replays the compiled `.olean` files directly:
+`lake comparator --paranoid` runs the four checkers named in `comparator.json` plus lean4lean.
+Lean 4.36's lean4lean rejects every export made by Lean 4.33.1 with
+`unknown constant 'Decidable.intro'`, because 4.36 redefined `Decidable` in the core library.
+The flag therefore fails on this project whatever the proof contains. So `comparator.json`
+names the other four checkers directly, and lean4lean `master` is built with Lean `v4.33.1`
+and replays the compiled `.olean` files:
 
 ```bash
 lake env lean4lean --fresh Main
@@ -208,6 +212,17 @@ on one thread.
 - Estimates for the real run, scaled from the smoke test and uncertain by a factor of 2 to 3:
   about 3.2 million declarations, a solution export of 70 to 75 GB, and about 12 hours for the
   five checkers in sequence, with a peak of roughly 285 GB of memory in con-ron.
+
+## Limits
+
+- Comparator checks the challenge and the solution against the same Mathlib, so it cannot
+  detect a modified Mathlib. The pin here is Mathlib's official `v4.33.1` tag, and the
+  challenge export is reproduced on GitHub's CI.
+- The exports are made by Lean 4.33.1 and judged by Lean 4.36.0. Lean's help text lists exports
+  made elsewhere as an intended use, and the export format version is the same (3.1.0), but
+  this is not the common path.
+- A passing run still trusts the checkers, Mathlib's definitions, Mathlib's official build
+  cache, the exporter, and the sandboxes.
 
 ## Results
 
