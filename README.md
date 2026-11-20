@@ -1,6 +1,6 @@
-# rh-lean-check
+# riemann-hypothesis
 
-[![checks](https://github.com/Deicyde/rh-lean-check/actions/workflows/checks.yml/badge.svg)](https://github.com/Deicyde/rh-lean-check/actions/workflows/checks.yml)
+[![checks](https://github.com/Deicyde/riemann-hypothesis/actions/workflows/checks.yml/badge.svg)](https://github.com/Deicyde/riemann-hypothesis/actions/workflows/checks.yml)
 
 A [Comparator](https://github.com/leanprover/comparator) setup for the Lean formalization
 claiming a proof of the Riemann Hypothesis and of GRH for Dirichlet L-functions, announced on
