@@ -41,6 +41,29 @@ def resource_tests(ci):
             override = workspace / "explicit-new-scratch"
             assert ci.choose_work_directory(workspace / "staging", override) == override.resolve()
             assert override.is_dir()
+        staging = workspace / "staging"
+        staging.mkdir()
+        try:
+            with ci.DurableBuildWork(workspace / "persistent", staging, {"candidate_head": "a" * 40}) as retained:
+                (retained.path / "finished.olean").write_bytes(b"completed raw output without LTAR")
+                raise KeyboardInterrupt()
+        except KeyboardInterrupt:
+            pass
+        assert (retained.path / "finished.olean").exists()
+        assert json.loads((retained.path / "checkpoint.json").read_text())["state"] == "interrupted"
+        try:
+            ci.release_uploaded_work(retained.path / "checkpoint.json", 123, "a" * 64)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("unrecovered interrupted raw work was released")
+        with ci.DurableBuildWork(workspace / "persistent", staging, {"candidate_head": "b" * 40}) as uploaded:
+            (uploaded.path / "finished.olean").write_bytes(b"successful completed proof")
+            uploaded.checkpoint("staged", 0)
+        assert uploaded.path.exists(), "success must survive until upload acknowledgement"
+        ci.release_uploaded_work(uploaded.path / "checkpoint.json", 456, "c" * 64)
+        assert not uploaded.path.exists()
+        assert (uploaded.path.parent / (uploaded.path.name + ".uploaded.json")).exists()
     with tempfile.TemporaryDirectory(prefix="rh-ci-root-link-") as directory:
         directory = Path(directory)
         (directory / "outside/lib").mkdir(parents=True)
@@ -231,7 +254,8 @@ roots = ["Base", "Stable", "Main"]
         invocation = [sys.executable, str(here.parent / "ci-build.py"), "--candidate", str(root), "--packages", str(packages),
                       "--dependency-manifest-sha256", ci.sha256(root / "lake-manifest.json"),
                       "--baseline-manifest", str(baseline), "--baseline-manifest-sha256", ci.sha256(baseline),
-                      "--baseline-map", str(base_map), "--baseline-cache", str(cache), "--jobs", "2"]
+                      "--baseline-map", str(base_map), "--baseline-cache", str(cache), "--jobs", "2",
+                      "--work-dir", str(temporary / "durable-work")]
         host_env = {**os.environ, "CI_HOST_SECRET": "not-for-candidate", "AWS_SECRET_ACCESS_KEY": "not-for-candidate"}
 
         def build(label, extra=(), succeeds=True):
