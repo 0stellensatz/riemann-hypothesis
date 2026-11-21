@@ -1,5 +1,9 @@
 # Lake cache bootstrap
 
+Operational CI and publishing use the workflow-owned release and baseline pins in `scripts/cache-baselines.json`. Dependency state and revision maps are scoped by toolchain. Completed jobs from a previous registered release retain that release's pins when publishing; the original archive bootstrap below remains specific to Lean 4.33.1.
+
+A release upgrade first completes a stock build with `lake --rehash build -o outputs.jsonl`. `scripts/stage-completed-build.py` validates that existing build and stages its compressed artifacts plus a separate module index, without rebuilding proofs. Publish from the operator credential host with `publish-lake-cache.py --module-manifest ...`, verify the public map/index and a cold client restoration, then activate the new descriptor's revision and SHA256 pins. An unconfigured release cannot fall back to another toolchain's archive.
+
 The proof artifacts come from [Jack McCarthy's published archive](https://huggingface.co/datasets/JackMcCarthy/riemann-hypothesis-build/tree/9036e64326acf4acfae159b96664e9708445c1d1): 175,187 `.olean`/`.ilean` pairs, 28,638,044,751 compressed bytes and 99,269,509,951 extracted bytes. `fetch-published-cache.py` verifies the archive, manifest, and every extracted file against pinned SHA256 checksums, rejecting links, duplicates, and unsafe paths.
 
 The preferred C source is the separately published [Lake build extras](https://huggingface.co/datasets/JackMcCarthy/riemann-hypothesis-build/tree/d4a057ad21e2f699743f0ed061fa2be73edfd68b/lake-extras), pinned to revision `d4a057ad21e2f699743f0ed061fa2be73edfd68b`. These came from another build, so their C must be checked against the preserved proof artifacts before use. External traces and hash files are never installed over the build tree.

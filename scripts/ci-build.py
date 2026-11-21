@@ -8,6 +8,7 @@ stock toolchain must already be prepared by the trusted runner.
 import argparse
 import gzip
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -22,9 +23,13 @@ import tarfile
 import tempfile
 import tomllib
 
-TOOLCHAIN = "leanprover/lean4:v4.33.1"
-DEPENDENCIES = "fee57ee9ed399d0a638ca955e5ad40a37a36eeb9b6dfd9f5964114fa7bbe4774"
-BASE_MANIFEST = "292caa386a620d935cfc736b56fcceaab9fe7073086693b62e899c1ee4725f04"
+
+_SETTINGS_SPEC = importlib.util.spec_from_file_location("rh_cache_settings", Path(__file__).with_name("cache-settings.py"))
+settings = importlib.util.module_from_spec(_SETTINGS_SPEC)
+_SETTINGS_SPEC.loader.exec_module(settings)
+TOOLCHAIN = settings.TOOLCHAIN
+DEPENDENCIES = settings.DEPENDENCIES
+BASE_MANIFEST = settings.MANIFEST_SHA
 HASH = re.compile(r"[0-9a-f]{16}\Z")
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 MODULE = re.compile(r"[\w']+(?:\.[\w']+)*\Z")
@@ -197,7 +202,7 @@ def snapshot(candidate, head, destination):
 def validate_inputs(project, expected_dependencies):
     config = tomllib.loads(safe_file(project, "lakefile.toml").read_text())
     if safe_file(project, "lean-toolchain").read_text().strip() != TOOLCHAIN:
-        raise ValueError("candidate must use the trusted stock Lean 4.33.1 toolchain")
+        raise ValueError(f"candidate must use the trusted stock toolchain {TOOLCHAIN}")
     if sha256(safe_file(project, "lake-manifest.json")) != expected_dependencies:
         raise ValueError("dependency manifest changed; prepare and attest its dependency cache first")
     if config.get("srcDir", ".") != "src" or config.get("extern_lib"):
@@ -534,8 +539,9 @@ def main():
         env = {**trusted_env(), "ELAN_TOOLCHAIN": TOOLCHAIN}
         args.toolchain = Path(subprocess.check_output(["elan", "which", "lean"], env=env, text=True).strip()).parent.parent
     toolchain = args.toolchain.resolve()
-    if not subprocess.check_output([str(toolchain / "bin/lean"), "--version"], env=trusted_env(), text=True).startswith("Lean (version 4.33.1,"):
-        raise ValueError("trusted toolchain is not stock Lean 4.33.1")
+    version = subprocess.check_output([str(toolchain / "bin/lean"), "--version"], env=trusted_env(), text=True)
+    if not version.startswith(f"Lean (version {settings.VERSION},") or settings.COMMIT not in version:
+        raise ValueError(f"trusted toolchain must be the pinned stock Lean {settings.VERSION} release")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
