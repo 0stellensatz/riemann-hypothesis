@@ -41,6 +41,8 @@ jobs:
           persist-credentials: false
           sparse-checkout: /scripts/
           sparse-checkout-cone-mode: false
+      - name: Install pinned S3 publisher SDK
+        run: python3 -m pip install --disable-pip-version-check -r scripts/ci-publisher-requirements.txt
       - name: Prepare completed build event, including manual publication retries
         env:
           GH_TOKEN: ${{ github.token }}
@@ -142,6 +144,8 @@ jobs:
           persist-credentials: false
           sparse-checkout: /scripts/
           sparse-checkout-cone-mode: false
+      - name: Install pinned S3 publisher SDK
+        run: python3 -m pip install --disable-pip-version-check -r scripts/ci-publisher-requirements.txt
       - name: Promote a successful source-equivalent cache without building
         env:
           GH_TOKEN: ${{ github.token }}
