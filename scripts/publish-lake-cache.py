@@ -25,14 +25,16 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-ACCOUNT = "3d0789805f97550dc0c368ac62187158"
+ACCOUNT = "ec2169bdf033f56b009956d4b64ba8ef"
 BUCKET = "riemann-hypothesis-cache"
 REPOSITORY = "leanprover-community/riemann-hypothesis"
 TOOLCHAIN = "leanprover/lean4:v4.33.1"
 TOOLCHAIN_DIR = "leanprover--lean4---v4.33.1"
 S3_ENDPOINT = f"https://{ACCOUNT}.r2.cloudflarestorage.com"
+PUBLIC_BASE_URL = "https://rh-cache.taucetiproject.org"
 ARTIFACT_CONTENT_TYPE = "application/vnd.reservoir.artifact"
 MAP_CONTENT_TYPE = "application/vnd.reservoir.outputs+json-lines"
+IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
 SCHEMA = "2026-03-17"
 HASH = re.compile(r"[0-9a-f]{16}\Z")
 ARTIFACT = re.compile(r"[0-9a-f]{16}\.ltar\Z")
@@ -102,7 +104,7 @@ def credentials(token_file: Path | None, credentials_file: Path | None) -> tuple
         secret = obj.get("secretAccessKey", obj.get("SecretAccessKey"))
         raw_token = ""
     else:
-        token_file = token_file or Path.home() / ".riemann-hypothesis-cf-token"
+        token_file = token_file or Path.home() / ".riemann-hypothesis-tauceti-r2-token"
         raw_token = private_file(token_file)
         if not raw_token or any(character.isspace() for character in raw_token):
             raise ValueError("API token file must contain only the token value")
@@ -204,7 +206,8 @@ def mirror(directory: Path, temporary: Path, access: str, secret: str, redaction
         sha = PUBLISHED_FILES[path.name][1] if path.name in PUBLISHED_FILES else digest(path)
         key = f"{MIRROR_PREFIX}/{path.name}"
         run([aws, "s3", "cp", str(path), f"s3://{BUCKET}/{key}", "--endpoint-url", S3_ENDPOINT,
-             "--metadata", f"sha256={sha}", "--only-show-errors", "--no-progress"],
+             "--metadata", f"sha256={sha}", "--cache-control", IMMUTABLE_CACHE_CONTROL,
+             "--only-show-errors", "--no-progress"],
             cwd=temporary, env=env, secrets=redactions)
         result = subprocess.run([aws, "s3api", "head-object", "--bucket", BUCKET, "--key", key,
                                  "--endpoint-url", S3_ENDPOINT, "--output", "json"],
@@ -239,15 +242,18 @@ def publish_map_after_sync(staging: Path, contents: bytes, repo: str, revision: 
     aws = shutil.which("aws")
     assert aws is not None
     run([aws, "s3", "cp", str(output), f"s3://{BUCKET}/{key}", "--endpoint-url", S3_ENDPOINT,
-         "--content-type", MAP_CONTENT_TYPE, "--only-show-errors", "--no-progress"],
+         "--content-type", MAP_CONTENT_TYPE, "--cache-control", IMMUTABLE_CACHE_CONTROL,
+         "--only-show-errors", "--no-progress"],
         cwd=temporary, env=env, secrets=redactions)
 
 
 def public_base(value: str | None, record: Path) -> str:
     if value is None and record.exists():
-        value = json.loads(record.read_text()).get("public_base_url")
+        metadata = json.loads(record.read_text())
+        if metadata.get("account_id") == ACCOUNT and metadata.get("bucket_name") == BUCKET:
+            value = metadata.get("public_base_url")
     if not value:
-        raise ValueError("Set --public-url to the bucket's anonymous read URL")
+        value = PUBLIC_BASE_URL
     parsed = urllib.parse.urlsplit(value)
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("The public bucket URL must be HTTPS, without credentials, query, or fragment")

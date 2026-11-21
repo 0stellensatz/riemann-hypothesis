@@ -41,10 +41,10 @@ Fixtures compare normalized outputs and input hashes with stock Lake builds, tes
 
 ## Public cache reads
 
-Set `PUBLIC_BASE_URL` to the published Cloudflare origin. Mathlib is fetched separately as above. Stock Lake requires `--repo` for a root-package cache on a custom service:
+The public cache uses the direct R2 custom domain `https://rh-cache.taucetiproject.org`, backed by a dedicated `riemann-hypothesis-cache` bucket in the TauCeti Cloudflare account. Mathlib is fetched separately as above. Stock Lake requires `--repo` for a root-package cache on a custom service:
 
 ```bash
-: "${PUBLIC_BASE_URL:?set the published Cloudflare cache origin}"
+PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://rh-cache.taucetiproject.org}"
 mkdir -p .lake
 cat > .lake/rh-cache.toml <<TOML
 cache.defaultService = "riemann-hypothesis"
@@ -75,6 +75,8 @@ python3 scripts/publish-lake-cache.py .lake/cache-staging \
   --rev e50d09817ad81469f737e8f637561e6ccf86c670
 ```
 
-The publisher reads a mode-0600 account R2 token from `~/.riemann-hypothesis-cf-token` and verifies the revision map through the anonymous endpoint. Never copy this credential to a proof-building machine. It rejects incomplete mappings, unexpected files, and links before upload. For a progressive upload, use `sync-cache-artifacts.py DIRECTORY --watch`; finalize with `publish-lake-cache.py DIRECTORY --rev REV --map-only-after-sync`, which checks every remote artifact's presence and size before publishing the map.
+The publisher reads a mode-0600 account R2 token from `~/.riemann-hypothesis-tauceti-r2-token`, scoped to the dedicated bucket in the TauCeti account, and verifies the revision map through the anonymous endpoint. Never copy this credential to a proof-building machine. It rejects incomplete mappings, unexpected files, and links before upload. For a progressive upload, use `sync-cache-artifacts.py DIRECTORY --watch`; finalize with `publish-lake-cache.py DIRECTORY --rev REV --map-only-after-sync`, which checks every remote artifact's presence and size before publishing the map.
+
+The original published olean archive and Lake-extras mirrors remain in the separate Riemann Hypothesis Cloudflare account. Production native-cache downloads use the custom domain above; the `r2.dev` development URL throttles a full 175,187-artifact download.
 
 For future source revisions, use a completed stock Lake build and `lake cache stage` to create staging; the archive bootstrap deliberately rejects changed sources. Publish a map for the exact source revision. A map can also be published with `--map-only-after-sync --platform x86_64-unknown-linux-gnu` for clients predating the portable-cache setting.

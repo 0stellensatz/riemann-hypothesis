@@ -93,7 +93,8 @@ def main() -> None:
                 pub.run([aws, "s3", "sync", str(aliases) + "/",
                          f"s3://{pub.BUCKET}/artifacts/{args.repo}/", "--endpoint-url", pub.S3_ENDPOINT,
                          "--size-only", "--no-follow-symlinks", "--exclude", "*", "--include", "*.art",
-                         "--content-type", pub.ARTIFACT_CONTENT_TYPE, "--only-show-errors", "--no-progress"],
+                         "--content-type", pub.ARTIFACT_CONTENT_TYPE, "--cache-control", pub.IMMUTABLE_CACHE_CONTROL,
+                         "--only-show-errors", "--no-progress"],
                         cwd=temporary, env=env, secrets=redactions)
             print(json.dumps({"phase": "preupload-complete", "repo": args.repo, **report}), flush=True)
             if not args.watch:

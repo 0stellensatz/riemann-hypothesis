@@ -7,7 +7,7 @@ fi
 
 RH_CACHE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 # Public reads need no Cloudflare account or upload credential.
-RH_CACHE_DEFAULT_URL='https://pub-884847f4b2f3414dafff28af7db8b7a3.r2.dev'
+RH_CACHE_DEFAULT_URL='https://rh-cache.taucetiproject.org'
 RIEMANN_CACHE_URL="${RIEMANN_CACHE_URL:-$RH_CACHE_DEFAULT_URL}"
 RIEMANN_CACHE_URL="${RIEMANN_CACHE_URL%/}"
 if [[ ! "$RIEMANN_CACHE_URL" =~ ^https://[a-zA-Z0-9./:_-]+$ ]]; then
