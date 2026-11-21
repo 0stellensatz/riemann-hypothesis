@@ -64,6 +64,16 @@ lake build
 
 Downloads populate mappings and compressed artifacts; builds restore required outputs and compile changed files. Public reads require no upload credential.
 
+On high-latency links, a per-invocation curl configuration increases parallel transfers:
+
+```bash
+mkdir -p .lake/cache-curl
+printf 'parallel-max = 500\n' > .lake/cache-curl/.curlrc
+CURL_HOME="$PWD/.lake/cache-curl" lake cache get --repo leanprover-community/riemann-hypothesis
+```
+
+The full anonymous cold download passed with all **175,187 archives / 4,938,217,979 bytes** in 4 minutes 47 seconds using this setting. Stock Lake spent approximately three minutes processing the index before transfers began. The unmodified default-concurrency control also ran without errors before the faster complete test superseded it.
+
 For the unchanged pinned source tree, an optional bulk restore avoids starting `leantar` separately for each module:
 
 ```bash
