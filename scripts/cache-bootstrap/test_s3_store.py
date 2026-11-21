@@ -24,8 +24,17 @@ class SDKStore(unittest.TestCase):
         self.root = Path(self.directory.name)
         with patch.object(ci.transport, "credentials", return_value=("test-access", "test-secret", "test-token")), \
                 patch.dict(os.environ, {"AWS_PROFILE": "missing-test-profile", "AWS_SESSION_TOKEN": "ambient-token",
-                                        "AWS_CONFIG_FILE": "/missing-test-config", "AWS_ENDPOINT_URL": "https://invalid.test"}):
+                                        "AWS_CONFIG_FILE": "/missing-test-config", "AWS_ENDPOINT_URL": "https://invalid.test",
+                                        "AWS_CA_BUNDLE": "/missing-ca-bundle", "AWS_CSM_ENABLED": "true",
+                                        "AWS_CSM_HOST": "198.51.100.1", "AWS_CSM_PORT": "1234",
+                                        "AWS_DATA_PATH": "/untrusted-sdk-models", "AWS_DEFAULTS_MODE": "invalid",
+                                        "AWS_S3_USE_ARN_REGION": "invalid", "AWS_MAX_ATTEMPTS": "invalid",
+                                        "BOTOCORE_EXPERIMENTAL__PLUGINS": "untrusted=untrusted_plugin"}), \
+                patch("botocore.monitoring.Monitor") as monitor, \
+                patch("botocore.session.load_client_plugins") as plugins:
             self.store = ci.S3Store(self.root)
+            monitor.assert_not_called()
+            plugins.assert_not_called()
         self.addCleanup(self.store.client.close)
         self.stub = Stubber(self.store.client)
         self.stub.activate()
@@ -48,6 +57,32 @@ class SDKStore(unittest.TestCase):
         self.assertEqual(client.meta.config.request_checksum_calculation, "when_required")
         self.assertEqual(client.meta.config.response_checksum_validation, "when_required")
         self.assertEqual(client._request_signer._credentials.token, "")
+        self.assertIs(client._endpoint.http_session._verify, True)
+
+    def test_no_ambient_models_or_config_providers(self):
+        import botocore.loaders
+        import botocore.session
+
+        sessions = []
+        original = botocore.session.Session.register_component
+
+        def register(session, name, component):
+            if name == "data_loader":
+                sessions.append((session, component))
+            return original(session, name, component)
+
+        with patch.object(botocore.session.Session, "register_component", register), \
+                patch.object(ci.transport, "credentials", return_value=("test-access", "test-secret", "")), \
+                patch.dict(os.environ, {"AWS_DATA_PATH": "/untrusted-sdk-models", "AWS_CSM_ENABLED": "true",
+                                        "AWS_CA_BUNDLE": "/missing-ca-bundle"}):
+            store = ci.S3Store(self.root)
+            store.client.close()
+        session, loader = sessions[0]
+        self.assertNotIn("/untrusted-sdk-models", loader.search_paths)
+        self.assertNotIn(botocore.loaders.Loader.CUSTOMER_DATA_PATH, loader.search_paths)
+        self.assertFalse(session.get_config_variable("csm_enabled"))
+        self.assertIsNone(session.get_config_variable("ca_bundle"))
+        self.assertIsNone(session.get_config_variable("data_path"))
 
     def test_put_preserves_create_and_compare_and_swap_conditions(self):
         for key, etag in (("artifacts/test.art", None), ("ci/revisions/test.json", '"old-etag"')):

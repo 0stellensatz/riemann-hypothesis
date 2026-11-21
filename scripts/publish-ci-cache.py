@@ -336,25 +336,38 @@ class Object:
 class S3Store:
     def __init__(self, directory: Path, token_file=None, credentials_file=None):
         import boto3.session
+        import botocore.loaders
         import botocore.session
         from botocore.config import Config
+        from botocore.configprovider import ConstantProvider
 
         access, secret, token = transport.credentials(token_file, credentials_file)
         self.redactions = (access, secret, token)
-        # Ignore ambient AWS profiles/configuration, as the CLI transport did.
-        session = botocore.session.Session(session_vars={
-            "profile": (None, None, None, None),
-            "config_file": (None, None, "/dev/null", None),
-            "credentials_file": (None, None, "/dev/null", None),
-        })
+        class PublisherSession(botocore.session.Session):
+            # This pinned SDK hook otherwise imports ambient client plugins.
+            def _register_client_plugins(self, client):
+                pass
+
+        # Keep SDK defaults, but remove every environment/file config provider.
+        variables = {name: (None, None, value[2], None)
+                     for name, value in PublisherSession.SESSION_VARIABLES.items()}
+        variables.update(config_file=(None, None, "/dev/null", None),
+                         credentials_file=(None, None, "/dev/null", None),
+                         csm_enabled=(None, None, False, None))
+        session = PublisherSession(session_vars=variables)
+        for section in ("s3", "proxies_config"):
+            session.get_component("config_store").set_config_provider(section, ConstantProvider({}))
+        # Load only installed SDK models, including no ~/.aws/models overrides.
+        session.register_component("data_loader", botocore.loaders.Loader(
+            extra_search_paths=[botocore.loaders.Loader.BUILTIN_DATA_PATH], include_default_search_paths=False))
         self.client = boto3.session.Session(botocore_session=session).client(
             "s3", endpoint_url=transport.S3_ENDPOINT, region_name="auto",
-            aws_access_key_id=access, aws_secret_access_key=secret, aws_session_token="",
+            aws_access_key_id=access, aws_secret_access_key=secret, aws_session_token="", verify=True,
             config=Config(signature_version="s3v4", s3={"addressing_style": "path"},
                           max_pool_connections=MAX_UPLOAD_WORKERS, connect_timeout=30, read_timeout=120,
                           retries={"mode": "standard", "total_max_attempts": 5},
                           request_checksum_calculation="when_required", response_checksum_validation="when_required",
-                          use_fips_endpoint=False, use_dualstack_endpoint=False))
+                          use_fips_endpoint=False, use_dualstack_endpoint=False, ignore_configured_endpoint_urls=True))
 
     def _call(self, operation: str, allowed=(), **kwargs) -> dict | str:
         from botocore.exceptions import BotoCoreError, ClientError
