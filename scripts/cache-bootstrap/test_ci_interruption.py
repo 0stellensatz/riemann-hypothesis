@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Interrupt a real stock build; recover completed raw outputs without elaboration."""
 import importlib.util
+import argparse
 import json
 import os
 from pathlib import Path
@@ -12,10 +13,14 @@ import time
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--handoff-only", action="store_true")
+    args = parser.parse_args()
     here = Path(__file__).resolve().parent
     spec = importlib.util.spec_from_file_location("ci_interrupt", here.parent / "ci-build.py")
     ci = importlib.util.module_from_spec(spec); spec.loader.exec_module(ci)
-    for partial_pack in (False, True):
+    cases = [(False, True)] if args.handoff_only else [(False, False), (True, False), (True, True)]
+    for partial_pack, handoff in cases:
         with tempfile.TemporaryDirectory(prefix="rh-interrupt-fixture-") as directory:
             directory = Path(directory)
             root, packages, output, durable = (directory / name for name in ("project", "packages", "staging", "persistent"))
@@ -46,6 +51,7 @@ def main():
                        "--dependency-manifest-sha256", ci.sha256(root / "lake-manifest.json")]
             with (directory / "controller.log").open("wb") as log:
                 process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+                frozen = []
                 try:
                     deadline = time.monotonic() + 45
                     while time.monotonic() < deadline:
@@ -58,6 +64,31 @@ def main():
                     else:
                         raise AssertionError("long-module marker was not reached")
                     work = runs[0]
+                    if handoff:
+                        process.send_signal(signal.SIGSTOP)
+                        for _ in range(10):
+                            pending, children = [process.pid], set()
+                            while pending:
+                                child = pending.pop()
+                                if child in children:
+                                    continue
+                                children.add(child)
+                                try:
+                                    os.kill(child, signal.SIGSTOP)
+                                    for task in Path(f"/proc/{child}/task").iterdir():
+                                        pending.extend(map(int, (task / "children").read_text().split()))
+                                except (ProcessLookupError, FileNotFoundError):
+                                    pass
+                            try:
+                                frozen = ci.verify_quiesced_controller(process.pid)
+                                break
+                            except ValueError:
+                                time.sleep(0.1)
+                        assert frozen, "fixture process tree did not quiesce"
+                        adopted = durable / "run-handoff"
+                        work.rename(adopted)
+                        assert not work.exists()
+                        work = adopted
                     fast = work / "project/.lake/build/lib/lean/Fast.olean"
                     assert fast.exists() and (fast.with_suffix(".trace")).exists()
                     original, mtime = fast.read_bytes(), fast.stat().st_mtime_ns
@@ -77,17 +108,51 @@ def main():
                         destination.write_bytes(old_parts[Path("ir") / (name + ".ltar")])
                     with (work / "project/.lake/build/ir/Corrupt.c").open("ab") as stream:
                         stream.write(b"corrupted after the saved completed trace")
-                    process.send_signal(signal.SIGINT)
-                    code = process.wait(timeout=45)
-                    assert code == 130, (code, (directory / "controller.log").read_text())
+                    actual_exit = 130
+                    if handoff:
+                        request = {"repository": "leanprover-community/riemann-hypothesis", "run_id": 42,
+                                   "expected": {"candidate_head": git("rev-parse", "HEAD"), "candidate_tree": git("rev-parse", "HEAD^{tree}"),
+                                    "source_tree": git("rev-parse", "HEAD:src"), "build_roots": {}, "toolchain": ci.TOOLCHAIN,
+                                    "lakefile_sha256": ci.sha256(root / "lakefile.toml"), "manifest_sha256": ci.sha256(root / "lake-manifest.json")}}
+                        request_path = directory / "original-request.json"
+                        request_path.write_text(json.dumps(request))
+                        recovered_output = directory / "recovered-staging"
+                        recover = [*command, "--recover-work", str(work), "--recover-request", str(request_path),
+                                   "--recover-controller-pid", str(process.pid), "--recover-log", str(output / "build.log"),
+                                   "--recover-exit-code", "137"]
+                        recover[recover.index("--output") + 1] = str(recovered_output)
+                        with (directory / "handoff.log").open("wb") as recovered_log:
+                            result = subprocess.run(recover, stdout=recovered_log, stderr=subprocess.STDOUT, timeout=45)
+                        assert result.returncode == 137, (directory / "handoff.log").read_text()
+                        assert Path(f"/proc/{process.pid}/status").read_text().split("State:", 1)[1].splitlines()[0].strip().startswith("T")
+                        process.kill()
+                        code = ci.normalized_exit_code(process.wait(timeout=10))
+                        assert code == 137
+                        output, actual_exit = recovered_output, 137
+                        for child in frozen:
+                            try:
+                                os.kill(child, signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
+                    else:
+                        process.send_signal(signal.SIGINT)
+                        code = process.wait(timeout=45)
+                        assert code == 130, (code, (directory / "controller.log").read_text())
                     assert fast.read_bytes() == original and fast.stat().st_mtime_ns == mtime
                     checkpoint = json.loads((work / "checkpoint.json").read_text())
-                    assert checkpoint["state"] == "failed" and checkpoint["build_exit_code"] == 130
+                    assert checkpoint["state"] == "failed" and checkpoint["build_exit_code"] == actual_exit
                     receipt = json.loads((output / "receipt.json").read_text())
-                    assert receipt["build_exit_code"] == 130 and len(receipt["artifacts"]) == 1, (receipt, (work / "raw-recovery.log").read_text())
+                    assert receipt["build_exit_code"] == actual_exit and len(receipt["artifacts"]) == 1, (receipt, (work / "raw-recovery.log").read_text())
                     assert len(ci.load_map(output / "outputs.jsonl")) == 1
                     decisions = {row["name"]: row["ok"] for row in map(json.loads, (work / "result/raw-recovery.jsonl").read_text().splitlines())}
                     assert decisions == {"Fast": True, "Stale": False, "Corrupt": False}, decisions
+                    summary = json.loads((work / "raw-recovery-summary.json").read_text())
+                    assert summary["accepted"] == 1 and summary["stock_rejected"] == 2 and summary["unreported"] == 0
+                    if handoff:
+                        audit = json.loads((work / "handoff-audit.json").read_text())
+                        assert audit["original_run_id"] == 42 and audit["build_exit_code"] == 137
+                        assert audit["mapped_modules"] == 1 and audit["original_controller_pid"] == process.pid
+                        assert list(work.glob("checkpoint-before-recovery-*.json"))
                     item = receipt["artifacts"][0]
                     assert (output / "artifacts" / item["file"]).read_bytes() != b"truncated pack: arbitrary bytes have a valid hash but are not an LTAR"
                     # Ordinary workflow cleanup must not remove retained raw work.
@@ -95,6 +160,11 @@ def main():
                     shutil.rmtree(output)
                     assert fast.exists() and (work / "build.log").exists()
                 finally:
+                    for child in frozen:
+                        try:
+                            os.kill(child, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
                     if process.poll() is None:
                         process.kill(); process.wait()
     print("PASS interrupt preservation: completed raw proof survives; missing/truncated LTAR repacked by stock no-build recovery; failed checkpoint/log survive staging cleanup")
