@@ -353,6 +353,8 @@ def main() -> None:
     parser.add_argument("--platform", help="also scope this map to a platform (requires --map-only-after-sync)")
     args = parser.parse_args()
     select_toolchain(args.release)
+    if TOOLCHAIN != "leanprover/lean4:v4.33.1" and args.module_manifest is None:
+        parser.error("a completed-build --module-manifest is required for this release's cache namespace")
     if not re.fullmatch(r"[0-9a-f]{40}", args.revision):
         parser.error("--rev must be a full lowercase Git commit hash")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", args.repo):
