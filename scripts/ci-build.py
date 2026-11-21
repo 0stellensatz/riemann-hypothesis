@@ -394,7 +394,7 @@ def validate_packages(project, packages):
         directory = packages / name
         if directory.is_symlink() or git(directory, "rev-parse", "HEAD") != package["rev"]:
             raise ValueError(f"dependency checkout differs from its locked revision: {name}")
-        subprocess.run(["git", "-C", str(directory), "diff", "--no-ext-diff", "--quiet", "HEAD", "--"],
+        subprocess.run(["git", "-C", str(directory), "diff", "--no-ext-diff", "--no-textconv", "--quiet", "HEAD", "--"],
                        env=trusted_env(), check=True)
 
 
@@ -457,6 +457,8 @@ def verify_private_packages(project, packages, private):
                 actual = hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
             else:
                 path = safe_file(copied, name)
+                if bool(path.stat().st_mode & 0o111) != (mode == "100755"):
+                    raise ValueError("private dependency executable mode changed")
                 if path.stat().st_size != safe_file(public, name).stat().st_size:
                     raise ValueError("private dependency source size changed")
                 value = hashlib.sha1(f"blob {path.stat().st_size}\0".encode())
@@ -589,7 +591,8 @@ def native_hashes(toolchain, paths, work, basenames=True):
     source, jobs, output = work / "Hash.lean", work / "hash-jobs.jsonl", work / "hashes.jsonl"
     source.write_text(HASH_SOURCE)
     jobs.write_text("".join(json.dumps({"file": str(path)}) + "\n" for path in paths))
-    subprocess.run([str(toolchain / "bin/lean"), "--load-dynlib=" + str(toolchain / "lib/lean/libLake_shared.so"),
+    library = "libLake_shared.dylib" if sys.platform == "darwin" else "libLake_shared.so"
+    subprocess.run([str(toolchain / "bin/lean"), "--load-dynlib=" + str(toolchain / "lib/lean" / library),
                     "--run", str(source), str(jobs), str(output)], cwd=work, env=trusted_env(), check=True)
     return {(Path(row["file"]).name if basenames else row["file"]): row["actual"]
             for row in map(json.loads, output.read_text().splitlines())}
@@ -684,7 +687,7 @@ def recover_raw_outputs(project, cache, work, control, command, prefix, environm
             summary["known_cache"] += 1
             continue
         try:
-            for directory, extension in (("lib/lean", ".olean"), ("lib/lean", ".ilean"), ("ir", ".c")):
+            for directory, extension in (("lib/lean", ".olean"), ("lib/lean", ".ilean")):
                 safe_file(project / ".lake/build" / directory, str(module.parent / (module.name + extension)))
         except FileNotFoundError:
             summary["missing_raw"] += 1
@@ -697,7 +700,10 @@ def recover_raw_outputs(project, cache, work, control, command, prefix, environm
     source = Path(__file__).parent / "cache-bootstrap/RecoverCompleted.lean"
     contents = source.read_text()
     if TOOLCHAIN == "leanprover/lean4:v4.36.0":
-        contents = contents.replace("mod.leanArts.fetch", "mod.irArts.fetch")
+        # New module-system elaboration may postpone C/IR generation. Recover
+        # only trace-attested parts; normal builds can run leanir afterwards.
+        contents = contents.replace("mod.leanArts.fetch", "mod.elabArts.fetch")
+        contents = contents.replace("-- OPTIONAL_C_436", "c? := if expected.c?.isSome then arts.c? else none")
     (control / "RecoverCompleted.lean").write_text(contents)
     (control / "raw-recovery-jobs.json").write_text(json.dumps(names))
     report = work / "result/raw-recovery.jsonl"
@@ -915,7 +921,8 @@ def main():
         # Lean 4.33.1 omits the portable flag when reusing arts.ltar?, so -o
         # filters those entries from a platformIndependent map. Supplement only
         # current traces whose LTAR has an identical completed cache copy.
-        if not build_exit_code and tomllib.loads((project / "lakefile.toml").read_text()).get("platformIndependent") is True:
+        if (TOOLCHAIN == "leanprover/lean4:v4.33.1" and not build_exit_code and
+                tomllib.loads((project / "lakefile.toml").read_text()).get("platformIndependent") is True):
             recover_completed_map(project, cache, toolchain, work, mapping_file, base_hashes, mapping, known_mappings)
             mapping = load_map(mapping_file)
         collect_mapped_ltars(project, cache, mapping)
