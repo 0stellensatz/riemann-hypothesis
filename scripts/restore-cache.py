@@ -18,6 +18,7 @@ HEADER = {"schema": 1, "source_tree": "24df20b62d9976ccd20da819bc20b16f808f0fdd"
           "map_sha256": "fed2443b161bd8194d9507e5c9c0e555b865dbba6963a0d57172723a439e6941",
           "modules": 175187}
 CONFIG_HASHES = {"32af981ad33964a949f3e4d1e188e4afd0f85fecf6bf86e8ed133f00f16727ca",
+                 "a1b98b41c96ad1e78906a210f5c6806218bda1701356215983033b2f77d44c99",
                  "e4686772edd6823c948d7cd6b0dbcf6168e1bfcce9d1e6713f884f646ce4bd0b"}
 DEPENDENCIES_SHA256 = "fee57ee9ed399d0a638ca955e5ad40a37a36eeb9b6dfd9f5964114fa7bbe4774"
 MODULE = re.compile(r"[\w']+(?:\.[\w']+)*\Z")  # Unicode names occur in the pinned tree.

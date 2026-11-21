@@ -53,7 +53,7 @@ jobs:
           sh "$RUNNER_TEMP/elan-init.sh" -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Fetch Mathlib's official build cache
-        run: lake exe cache get
+        run: lake exe mathlib/cache get
       - name: Build only the Challenge module
         run: lake build Challenge
 

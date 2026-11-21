@@ -19,22 +19,18 @@ infrastructure:
 
 ## Using the build cache
 
-Fetch Mathlib's dependencies, then this project's compiled modules:
+Fetch and restore Mathlib and this project's compiled modules:
 
 ```bash
-MATHLIB_CACHE_GET_URL=https://cache.mathlib.org/mathlib4 lake exe cache get
-source scripts/cache-env.sh
-lake cache get --repo leanprover-community/riemann-hypothesis
-lake build Main
+lake exe cache get
+lake --no-build --rehash build Main
 ```
 
-The last command restores the cached outputs to `.lake/build`; subsequent builds compile changed
-modules and their dependents. Downloads are anonymous. `lake cache get` is Lake's native artifact
-cache; `lake exe cache get` is Mathlib's separate cache tool. Lake requires `--repo` to select this
-root package. The cache contains portable Lean outputs and generated C, with no native objects.
-
-For a faster first restore of the unchanged submission, run `python3 scripts/restore-cache.py`
-after downloading the cache and before `lake build Main`. It unpacks all modules in one batch.
+The cache settings are in `lakefile.toml`; no user configuration is needed. The first command
+fetches both caches anonymously and extracts the oleans to `.lake/build`. The second confirms
+that Lake considers all Main dependencies up to date, without compiling them. The project cache
+is 4.94 GB and contains portable Lean outputs and generated C. Subsequent ordinary builds
+compile changed modules and their dependents.
 
 The [cache notes](verification/CACHE.md) describe the pinned published archive, the cheaper
 bootstrap that reuses its proofs, and how to produce and publish future caches. For independent
@@ -59,12 +55,12 @@ export MATHLIB_CACHE_GET_URL=https://cache.mathlib.org/mathlib4   # Mathlib's cu
 
 # 1. Export the challenge. Clean clone at $CLEAN, Lean v4.33.1.
 cd "$CLEAN"
-lake exe cache get
+lake exe mathlib/cache get
 lake build Challenge
 lake env lean4export Challenge -- $(cat export-targets.txt) > challenge.export
 
 # 2. Build the solution. Second clone, inside a sandbox with no network. Takes hours.
-lake exe cache get      # before entering the sandbox
+lake exe mathlib/cache get      # before entering the sandbox
 lake build Main         # inside the sandbox
 
 # 3. Export the solution. Still inside the sandbox; only solution.export comes out.

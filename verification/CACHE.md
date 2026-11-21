@@ -23,7 +23,7 @@ Source Lean commands explicitly pass **`-j1`**. `LEAN_NUM_THREADS=1` alone does 
 
 ```bash
 ulimit -n 65536
-MATHLIB_CACHE_GET_URL=https://cache.mathlib.org/mathlib4 lake exe cache get
+MATHLIB_CACHE_GET_URL=https://cache.mathlib.org/mathlib4 lake exe mathlib/cache get
 python3 scripts/fetch-published-cache.py --download-dir .lake/published-cache
 python3 scripts/bootstrap-cache.py --workers 16
 ```
@@ -41,48 +41,20 @@ Fixtures compare normalized outputs and input hashes with stock Lake builds, tes
 
 ## Public cache reads
 
-The public cache uses the direct R2 custom domain `https://rh-cache.taucetiproject.org`, backed by a dedicated `riemann-hypothesis-cache` bucket in the TauCeti Cloudflare account. Mathlib is fetched separately as above. Stock Lake requires `--repo` for a root-package cache on a custom service:
+The public cache uses the direct R2 custom domain `https://rh-cache.taucetiproject.org`, backed by a dedicated `riemann-hypothesis-cache` bucket in the TauCeti Cloudflare account. Its service configuration is committed in `lakefile.toml`.
 
 ```bash
-PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://rh-cache.taucetiproject.org}"
-mkdir -p .lake
-cat > .lake/rh-cache.toml <<TOML
-cache.defaultService = "riemann-hypothesis"
-[[cache.service]]
-name = "riemann-hypothesis"
-kind = "s3"
-artifactEndpoint = "$PUBLIC_BASE_URL/artifacts"
-revisionEndpoint = "$PUBLIC_BASE_URL/revisions"
-TOML
-export LAKE_CONFIG="$PWD/.lake/rh-cache.toml"
-export LAKE_CACHE_DIR="$PWD/.lake/cache"
-export LAKE_ARTIFACT_CACHE=true
-export LAKE_RESTORE_ARTIFACTS=true
-lake cache get --repo leanprover-community/riemann-hypothesis
-lake build
-```
-
-Downloads populate mappings and compressed artifacts; builds restore required outputs and compile changed files. Public reads require no upload credential.
-
-On high-latency links, a per-invocation curl configuration increases parallel transfers:
-
-```bash
-mkdir -p .lake/cache-curl
-printf 'parallel-max = 500\n' > .lake/cache-curl/.curlrc
-CURL_HOME="$PWD/.lake/cache-curl" lake cache get --repo leanprover-community/riemann-hypothesis
-```
-
-The full anonymous cold download passed with all **175,187 archives / 4,938,217,979 bytes** in 4 minutes 47 seconds using this setting. Stock Lake spent approximately three minutes processing the index before transfers began. The unmodified default-concurrency control also ran without errors before the faster complete test superseded it.
-
-For the unchanged pinned source tree, an optional bulk restore avoids starting `leantar` separately for each module:
-
-```bash
-lake cache get --repo leanprover-community/riemann-hypothesis
-python3 scripts/restore-cache.py
+lake exe cache get
 lake --no-build --rehash build Main
 ```
 
-The helper downloads a SHA256-pinned module manifest, checks source/configuration and every completed cached archive's SHA256, then calls stock `leantar` once with 24 workers. It rejects incomplete downloads and source/output symlinks, performs no compilation, and needs no credentials. Use ordinary `lake build` for changed sources. A full local bulk restore and subsequent stock no-build graph check passed; the helper's small fixture is `python3 scripts/cache-bootstrap/test_restore.py`.
+The project's `cache` executable delegates to Mathlib's qualified `mathlib/cache` executable, then downloads the root package with stock Lake and bulk-restores the verified archives. It internally selects the lakefile's service, uses a temporary curl configuration for 500 parallel transfers, and raises only its child process file-descriptor limit for Mathlib's unpacker. No user configuration or upload credential is needed. Bare `lake cache get` is stock Lake's separate built-in command and does not select this root-package service automatically in Lean 4.33.1.
+
+The full anonymous cold native download passed with all **175,187 archives / 4,938,217,979 bytes** in 4 minutes 47 seconds. Stock Lake spent approximately three minutes processing the index before transfers began. The default-concurrency control also ran without errors before the faster complete test superseded it.
+
+The bulk restore checks the pinned source/configuration and every completed archive's SHA256, then calls stock `leantar` once with 24 workers. Actual HTTPS-manifest download, archive checks and restoration passed in 91 seconds; the subsequent full stock no-build/rehash check passed in 44 seconds. Its small fixture is `python3 scripts/cache-bootstrap/test_restore.py`.
+
+For independent verification or fetching Mathlib alone, use `lake exe mathlib/cache get`, which bypasses this project's combined entry point.
 
 ## Publish a completed cache
 

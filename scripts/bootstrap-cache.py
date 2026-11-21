@@ -24,6 +24,7 @@ PUBLISHED_PROVENANCE = {
     "source_path": "src",
     "source_tree": "24df20b62d9976ccd20da819bc20b16f808f0fdd",
     "lakefile_sha256": [
+        "a1b98b41c96ad1e78906a210f5c6806218bda1701356215983033b2f77d44c99",
         "32af981ad33964a949f3e4d1e188e4afd0f85fecf6bf86e8ed133f00f16727ca",
         "e4686772edd6823c948d7cd6b0dbcf6168e1bfcce9d1e6713f884f646ce4bd0b",
     ],
