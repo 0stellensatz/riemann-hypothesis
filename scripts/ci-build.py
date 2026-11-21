@@ -129,6 +129,27 @@ class DurableBuildWork:
         # upload failure. Acknowledged successful uploads may release it later.
 
 
+def build_log_link(primary, visible):
+    try:
+        os.link(primary, visible)
+    except OSError as error:
+        import errno
+        if error.errno != errno.EXDEV:
+            raise
+        # The durable state volume and disposable workspace may differ. Keep
+        # the durable file authoritative; mirror it while the process runs.
+        shutil.copyfile(primary, visible)
+
+
+def sync_visible_log(log, visible):
+    if visible is None or os.path.samefile(log.name, visible):
+        return
+    log.flush()
+    with open(log.name, "rb") as source, visible.open("ab") as destination:
+        source.seek(destination.tell())
+        shutil.copyfileobj(source, destination, 1024 * 1024)
+
+
 def release_uploaded_work(checkpoint, artifact_id, artifact_digest):
     checkpoint = checkpoint.absolute()
     record = json.loads(safe_file(checkpoint.parent, checkpoint.name).read_text())
@@ -166,7 +187,7 @@ def stop_build_process(process, command, environment):
         return process.wait()
 
 
-def supervised_build(command, environment, log, filesystems, reserve_gib):
+def supervised_build(command, environment, log, filesystems, reserve_gib, visible_log=None):
     reserve = reserve_gib * 1024**3
     if any(shutil.disk_usage(path).free < reserve for path in filesystems):
         raise ValueError("insufficient free disk for the CI build reserve")
@@ -174,18 +195,23 @@ def supervised_build(command, environment, log, filesystems, reserve_gib):
                                start_new_session=True)
     while True:
         try:
-            return normalized_exit_code(process.wait(timeout=2))
+            code = process.wait(timeout=2)
+            sync_visible_log(log, visible_log)
+            return normalized_exit_code(code)
         except KeyboardInterrupt:
             log.write(b"\nCI controller: interrupted; stopping candidate and retaining raw work.\n")
             log.flush()
             stop_build_process(process, command, environment)
+            sync_visible_log(log, visible_log)
             return 130
         except subprocess.TimeoutExpired:
+            sync_visible_log(log, visible_log)
             if all(shutil.disk_usage(path).free >= reserve for path in filesystems):
                 continue
             log.write(b"\nCI controller: free disk fell below the reserve; terminating candidate.\n")
             log.flush()
             code = stop_build_process(process, command, environment)
+            sync_visible_log(log, visible_log)
             return normalized_exit_code(code) or 143
 
 
@@ -578,13 +604,16 @@ def recover_raw_outputs(project, cache, work, control, command, prefix, environm
             continue
         names.append(name)
     if not names:
-        return
+        return {}
     source = Path(__file__).parent / "cache-bootstrap/RecoverCompleted.lean"
     contents = source.read_text()
     if TOOLCHAIN == "leanprover/lean4:v4.36.0":
         contents = contents.replace("mod.leanArts.fetch", "mod.irArts.fetch")
     (control / "RecoverCompleted.lean").write_text(contents)
     (control / "raw-recovery-jobs.json").write_text(json.dumps(names))
+    report = work / "result/raw-recovery.jsonl"
+    if report.exists() or report.is_symlink():
+        report.unlink()
     fresh_prefix = [f"--unit=rh-ci-recover-{os.getpid()}-{os.urandom(4).hex()}.scope" if item.startswith("--unit=") else item for item in prefix]
     with (work / "raw-recovery.log").open("wb") as log:
         code = supervised_build(fresh_prefix + command + ["/opt/lean/bin/lean",
@@ -592,6 +621,30 @@ def recover_raw_outputs(project, cache, work, control, command, prefix, environm
             "/work/project", "/control/raw-recovery-jobs.json", "/work/result/raw-recovery.jsonl", "/control/packages.json"],
             environment, log, (work,), reserve_gib)
     print(f"Stock no-build raw recovery processed {len(names)} candidate modules (exit {code}); raw work remains retained", flush=True)
+    verified, seen = {}, set()
+    if report.exists():
+        report = safe_file(work / "result", "raw-recovery.jsonl")
+        if report.stat().st_size > 64 * 1024**2:
+            raise ValueError("raw recovery report exceeds its metadata bound")
+        for line in report.read_text().splitlines():
+            row = json.loads(line)
+            name = row.get("name")
+            if name not in names or name in seen or type(row.get("ok")) is not bool:
+                raise ValueError("unexpected raw recovery decision")
+            seen.add(name)
+            if not row["ok"]:
+                continue
+            input_hash, artifact = row.get("input", ""), row.get("artifact", "")
+            if (not HASH.fullmatch(input_hash) or not artifact.endswith(".ltar") or
+                    not HASH.fullmatch(artifact[:-5])):
+                raise ValueError("invalid verified recovery artifact")
+            module = Path(*name.split("."))
+            trace = safe_file(project / ".lake/build/lib/lean", str(module.parent / (module.name + ".trace")))
+            if json.loads(trace.read_text()).get("depHash") != input_hash:
+                raise ValueError("recovery decision differs from the verified current trace")
+            safe_file(cache, "artifacts/" + artifact)
+            verified[input_hash] = artifact
+    return verified
 
 
 def collect_mapped_ltars(project, cache, mapping):
@@ -702,10 +755,10 @@ def main():
                            env=trusted_env(), check=True)
         workspace.checkpoint("building")
         with (work / "build.log").open("wb") as log:
-            os.link(work / "build.log", output / "build.log")
+            build_log_link(work / "build.log", output / "build.log")
             build_exit_code = supervised_build(
                 resource_prefix + command + ["/opt/lean/bin/lake", "--packages", overrides, "--rehash", "build", "-o", "/work/result/outputs.jsonl"],
-                build_environment, log, (work, output), args.reserve_disk_gib)
+                build_environment, log, (work, output), args.reserve_disk_gib, output / "build.log")
         mapping_file = result / "outputs.jsonl"
         if build_exit_code:
             workspace.checkpoint("recovering", build_exit_code)
@@ -718,8 +771,14 @@ def main():
                     # verified completed modules; never parse a partial record.
                     shutil.copyfile(mapping_file, work / "interrupted-outputs.jsonl")
                     mapping_file.unlink()
-            recover_raw_outputs(project, cache, work, control, command, resource_prefix, build_environment,
-                                args.reserve_disk_gib, known_mappings, existing)
+            verified = recover_raw_outputs(project, cache, work, control, command, resource_prefix, build_environment,
+                                           args.reserve_disk_gib, known_mappings, existing)
+            # Only actual stock -o successes and explicit current no-build
+            # recovery successes are fresh partial completions. A rejected
+            # stale/corrupt module must not reenter via an old LTAR/cache pair.
+            existing.update(verified)
+            mapping_file.write_text(json.dumps(SCHEMA) + "\n" +
+                                   "".join(json.dumps(row) + "\n" for row in sorted(existing.items())))
         if build_exit_code and not mapping_file.exists() and not mapping_file.is_symlink():
             recover_completed_map(project, cache, toolchain, work, mapping_file, base_hashes, known_mappings=known_mappings)
         mapping_file = safe_file(result, "outputs.jsonl")
@@ -727,7 +786,7 @@ def main():
         # Lean 4.33.1 omits the portable flag when reusing arts.ltar?, so -o
         # filters those entries from a platformIndependent map. Supplement only
         # current traces whose LTAR has an identical completed cache copy.
-        if build_exit_code or tomllib.loads((project / "lakefile.toml").read_text()).get("platformIndependent") is True:
+        if not build_exit_code and tomllib.loads((project / "lakefile.toml").read_text()).get("platformIndependent") is True:
             recover_completed_map(project, cache, toolchain, work, mapping_file, base_hashes, mapping, known_mappings)
             mapping = load_map(mapping_file)
         collect_mapped_ltars(project, cache, mapping)

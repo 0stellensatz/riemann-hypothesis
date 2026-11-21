@@ -6,6 +6,7 @@ import gzip
 import hashlib
 import importlib.util
 import io
+import errno
 import json
 import os
 from pathlib import Path
@@ -64,6 +65,14 @@ def resource_tests(ci):
         ci.release_uploaded_work(uploaded.path / "checkpoint.json", 456, "c" * 64)
         assert not uploaded.path.exists()
         assert (uploaded.path.parent / (uploaded.path.name + ".uploaded.json")).exists()
+        primary, visible = workspace / "durable.log", workspace / "visible.log"
+        primary.write_bytes(b"first")
+        with patch.object(ci.os, "link", side_effect=OSError(errno.EXDEV, "separate filesystems")):
+            ci.build_log_link(primary, visible)
+        with primary.open("ab") as log:
+            log.write(b" second"); log.flush()
+            ci.sync_visible_log(log, visible)
+        assert primary.read_bytes() == visible.read_bytes() == b"first second"
     with tempfile.TemporaryDirectory(prefix="rh-ci-root-link-") as directory:
         directory = Path(directory)
         (directory / "outside/lib").mkdir(parents=True)
