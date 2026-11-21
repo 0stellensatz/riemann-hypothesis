@@ -70,7 +70,8 @@ def build_resources(memory_gib, tasks_max):
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if probe.returncode:
         raise ValueError("requested memory limit requires an available systemd user manager")
-    return ["systemd-run", "--user", "--scope", "--quiet",
+    unit = f"rh-ci-{os.getpid()}-{os.urandom(4).hex()}.scope"
+    return ["systemd-run", "--user", "--scope", "--quiet", "--unit=" + unit,
             "--property=MemoryMax=" + str(memory_gib * 1024**3),
             "--property=TasksMax=" + str(tasks_max), "--"], environment
 
@@ -89,6 +90,82 @@ def choose_work_directory(output, override=None):
     return directory.resolve()
 
 
+class DurableBuildWork:
+    """Raw completed work survives every exit until a trusted upload acknowledgement."""
+    def __init__(self, parent, output, identity, adopt=None):
+        parent.mkdir(parents=True, exist_ok=True)
+        if adopt is None:
+            self.path = Path(tempfile.mkdtemp(prefix="run-", dir=parent))
+        else:
+            self.path = adopt.absolute()
+            if (self.path.parent != parent or not self.path.name.startswith("run-") or self.path.is_symlink()
+                    or not self.path.is_dir() or self.path.stat().st_uid != os.getuid()):
+                raise ValueError("recovered work must be an owned run-* directory in the durable work parent")
+        self.output, self.identity, self.state = output, identity, "preparing"
+        self.exit_code = None
+
+    def checkpoint(self, state, exit_code=None):
+        self.state, self.exit_code = state, exit_code
+        record = {"schema": 1, "state": state, "build_exit_code": exit_code,
+                  "controller_pid": os.getpid(), "work": str(self.path), "staging": str(self.output),
+                  "identity": self.identity}
+        temporary = self.path / "checkpoint.json.writing"
+        with temporary.open("w") as stream:
+            stream.write(json.dumps(record, sort_keys=True, indent=2) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(self.path / "checkpoint.json")
+
+    def __enter__(self):
+        self.checkpoint("preparing")
+        (self.output / "work-checkpoint.json").write_text(json.dumps({"checkpoint": str(self.path / "checkpoint.json")}) + "\n")
+        return self
+
+    def __exit__(self, kind, value, traceback):
+        if kind is not None:
+            self.checkpoint("interrupted" if issubclass(kind, (KeyboardInterrupt, SystemExit)) else "failed", self.exit_code)
+        print(f"Retained CI work: {self.path / 'checkpoint.json'}", flush=True)
+        # Intentionally no destructor/rmtree, including after SIGKILL or an
+        # upload failure. Acknowledged successful uploads may release it later.
+
+
+def release_uploaded_work(checkpoint, artifact_id, artifact_digest):
+    checkpoint = checkpoint.absolute()
+    record = json.loads(safe_file(checkpoint.parent, checkpoint.name).read_text())
+    if (record.get("schema") != 1 or record.get("state") != "staged" or record.get("build_exit_code") != 0 or
+            record.get("work") != str(checkpoint.parent) or not checkpoint.parent.name.startswith("run-") or
+            artifact_id <= 0 or not SHA.fullmatch(artifact_digest)):
+        raise ValueError("only a fully staged successful build with an acknowledged durable upload can be released")
+    if checkpoint.parent.stat().st_uid != os.getuid():
+        raise ValueError("retained work is not owned by this runner account")
+    acknowledgement = {"schema": 1, "work": str(checkpoint.parent), "identity": record["identity"],
+                       "uploaded_artifact_id": artifact_id, "uploaded_artifact_digest": artifact_digest}
+    marker = checkpoint.parent.parent / (checkpoint.parent.name + ".uploaded.json")
+    marker.write_text(json.dumps(acknowledgement, sort_keys=True, indent=2) + "\n")
+    shutil.rmtree(checkpoint.parent)
+
+
+def stop_build_process(process, command, environment):
+    unit = next((argument.removeprefix("--unit=") for argument in command if argument.startswith("--unit=")), None)
+    def send(signum):
+        if unit:
+            try:
+                subprocess.run(["systemctl", "--user", "kill", "--kill-whom=all", "--signal=" + signal.Signals(signum).name, unit],
+                               env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        try:
+            os.killpg(process.pid, signum)
+        except ProcessLookupError:
+            pass
+    send(signal.SIGTERM)
+    try:
+        return process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        send(signal.SIGKILL)
+        return process.wait()
+
+
 def supervised_build(command, environment, log, filesystems, reserve_gib):
     reserve = reserve_gib * 1024**3
     if any(shutil.disk_usage(path).free < reserve for path in filesystems):
@@ -98,23 +175,17 @@ def supervised_build(command, environment, log, filesystems, reserve_gib):
     while True:
         try:
             return normalized_exit_code(process.wait(timeout=2))
+        except KeyboardInterrupt:
+            log.write(b"\nCI controller: interrupted; stopping candidate and retaining raw work.\n")
+            log.flush()
+            stop_build_process(process, command, environment)
+            return 130
         except subprocess.TimeoutExpired:
             if all(shutil.disk_usage(path).free >= reserve for path in filesystems):
                 continue
             log.write(b"\nCI controller: free disk fell below the reserve; terminating candidate.\n")
             log.flush()
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                code = process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                code = process.wait()
+            code = stop_build_process(process, command, environment)
             return normalized_exit_code(code) or 143
 
 
@@ -166,6 +237,10 @@ def snapshot(candidate, head, destination):
         code = process.wait()
     if code:
         raise ValueError("could not snapshot candidate commit")
+    verify_snapshot(candidate, head, destination)
+
+
+def verify_snapshot(candidate, head, destination):
     # Git archive applies .gitattributes. Verify actual Git blobs so export-ignore
     # cannot omit inputs and export-subst cannot change the attested source tree.
     inventory = subprocess.check_output(["git", "-C", str(candidate), "ls-tree", "-r", "-z", head,
@@ -285,7 +360,7 @@ def private_package_builds(project, packages, destination):
     return destination
 
 
-def baseline(args, project, cache):
+def baseline(args, project, cache, restore=True):
     if args.baseline_manifest is None:
         return {}, [], None
     if not args.baseline_map or not args.baseline_cache:
@@ -312,6 +387,8 @@ def baseline(args, project, cache):
         if filename in hashes and hashes[filename] != digest:
             raise ValueError("conflicting baseline archive digest")
         hashes[filename] = digest
+        if not restore:
+            continue
         module = Path(*name.split("."))
         source = project / "src" / module.with_suffix(".lean")
         if not source.is_file():
@@ -485,6 +562,38 @@ def recover_completed_map(project, cache, toolchain, work, destination, known_ha
     print(f"Retained {len(mapping)} verified completed module mappings", flush=True)
 
 
+def recover_raw_outputs(project, cache, work, control, command, prefix, environment, reserve_gib,
+                        known_mappings, existing):
+    names = []
+    for name, module, dep_hash in module_traces(project, incomplete=True):
+        if dep_hash in existing:
+            continue
+        filename = known_mappings.get(dep_hash)
+        if filename and (cache / "artifacts" / filename).is_file():
+            continue
+        try:
+            for directory, extension in (("lib/lean", ".olean"), ("lib/lean", ".ilean"), ("ir", ".c")):
+                safe_file(project / ".lake/build" / directory, str(module.parent / (module.name + extension)))
+        except FileNotFoundError:
+            continue
+        names.append(name)
+    if not names:
+        return
+    source = Path(__file__).parent / "cache-bootstrap/RecoverCompleted.lean"
+    contents = source.read_text()
+    if TOOLCHAIN == "leanprover/lean4:v4.36.0":
+        contents = contents.replace("mod.leanArts.fetch", "mod.irArts.fetch")
+    (control / "RecoverCompleted.lean").write_text(contents)
+    (control / "raw-recovery-jobs.json").write_text(json.dumps(names))
+    fresh_prefix = [f"--unit=rh-ci-recover-{os.getpid()}-{os.urandom(4).hex()}.scope" if item.startswith("--unit=") else item for item in prefix]
+    with (work / "raw-recovery.log").open("wb") as log:
+        code = supervised_build(fresh_prefix + command + ["/opt/lean/bin/lean",
+            "--load-dynlib=/opt/lean/lib/lean/libLake_shared.so", "--run", "/control/RecoverCompleted.lean",
+            "/work/project", "/control/raw-recovery-jobs.json", "/work/result/raw-recovery.jsonl", "/control/packages.json"],
+            environment, log, (work,), reserve_gib)
+    print(f"Stock no-build raw recovery processed {len(names)} candidate modules (exit {code}); raw work remains retained", flush=True)
+
+
 def collect_mapped_ltars(project, cache, mapping):
     """Stock -o confirms completed packs; readonly cache leaves new LTARs local."""
     missing = {filename for filename in mapping.values()
@@ -504,13 +613,21 @@ def collect_mapped_ltars(project, cache, mapping):
 
 
 def main():
+    if sys.argv[1:2] == ["--release-work"]:
+        release = argparse.ArgumentParser(description="Release successful raw work only after its compressed cache upload succeeds")
+        release.add_argument("--release-work", type=Path, required=True)
+        release.add_argument("--uploaded-artifact-id", type=int, required=True)
+        release.add_argument("--uploaded-artifact-digest", required=True)
+        arguments = release.parse_args()
+        release_uploaded_work(arguments.release_work, arguments.uploaded_artifact_id, arguments.uploaded_artifact_digest)
+        return 0
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--packages", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--toolchain", type=Path)
     parser.add_argument("--work-dir", type=Path,
-                        help="persistent scratch parent (default: staging output's parent, not /tmp)")
+                        help="durable work parent (default: RH_CI_STATE_DIR/failed-work outside the GitHub workspace)")
     parser.add_argument("--jobs", type=int, default=24)
     parser.add_argument("--memory-gib", type=int,
                         help="fail-closed systemd user scope memory limit for the candidate build")
@@ -549,8 +666,12 @@ def main():
         soft, hard = resource.getrlimit(kind)
         desired = hard if preferred is None else (preferred if hard == resource.RLIM_INFINITY else min(preferred, hard))
         resource.setrlimit(kind, (desired, hard))
-    with tempfile.TemporaryDirectory(prefix="rh-ci-build-", dir=choose_work_directory(output, args.work_dir)) as temporary:
-        work = Path(temporary)
+    state_root = Path(os.environ.get("RH_CI_STATE_DIR", str(Path.home() / ".local/share/riemann-build-state")))
+    work_parent = choose_work_directory(output, args.work_dir or (state_root / "failed-work"))
+    if os.environ.get("GITHUB_WORKSPACE") and work_parent.is_relative_to(Path(os.environ["GITHUB_WORKSPACE"]).resolve()):
+        raise ValueError("durable CI work must stay outside the disposable GitHub workspace")
+    with DurableBuildWork(work_parent, output, provenance) as workspace:
+        work = workspace.path
         project, cache, result, control = work / "project", work / "cache", work / "result", work / "control"
         for directory in (project, cache / "artifacts", result, control):
             directory.mkdir(parents=True)
@@ -579,11 +700,26 @@ def main():
         for cache_map in extra_maps:
             subprocess.run(command + ["/opt/lean/bin/lake", "--packages", overrides, "cache", "add", cache_map],
                            env=trusted_env(), check=True)
-        with (output / "build.log").open("wb") as log:
+        workspace.checkpoint("building")
+        with (work / "build.log").open("wb") as log:
+            os.link(work / "build.log", output / "build.log")
             build_exit_code = supervised_build(
                 resource_prefix + command + ["/opt/lean/bin/lake", "--packages", overrides, "--rehash", "build", "-o", "/work/result/outputs.jsonl"],
                 build_environment, log, (work, output), args.reserve_disk_gib)
         mapping_file = result / "outputs.jsonl"
+        if build_exit_code:
+            workspace.checkpoint("recovering", build_exit_code)
+            existing = {}
+            if mapping_file.exists():
+                try:
+                    existing = load_map(safe_file(result, "outputs.jsonl"))
+                except (ValueError, json.JSONDecodeError):
+                    # Preserve a torn -o file, then recover only independently
+                    # verified completed modules; never parse a partial record.
+                    shutil.copyfile(mapping_file, work / "interrupted-outputs.jsonl")
+                    mapping_file.unlink()
+            recover_raw_outputs(project, cache, work, control, command, resource_prefix, build_environment,
+                                args.reserve_disk_gib, known_mappings, existing)
         if build_exit_code and not mapping_file.exists() and not mapping_file.is_symlink():
             recover_completed_map(project, cache, toolchain, work, mapping_file, base_hashes, known_mappings=known_mappings)
         mapping_file = safe_file(result, "outputs.jsonl")
@@ -591,7 +727,7 @@ def main():
         # Lean 4.33.1 omits the portable flag when reusing arts.ltar?, so -o
         # filters those entries from a platformIndependent map. Supplement only
         # current traces whose LTAR has an identical completed cache copy.
-        if tomllib.loads((project / "lakefile.toml").read_text()).get("platformIndependent") is True:
+        if build_exit_code or tomllib.loads((project / "lakefile.toml").read_text()).get("platformIndependent") is True:
             recover_completed_map(project, cache, toolchain, work, mapping_file, base_hashes, mapping, known_mappings)
             mapping = load_map(mapping_file)
         collect_mapped_ltars(project, cache, mapping)
@@ -640,6 +776,7 @@ def main():
                 zipped.write((json.dumps(row, separators=(",", ":")) + "\n").encode())
         receipt.update(module_manifest_sha256=sha256(manifest), module_manifest_bytes=manifest.stat().st_size)
         (output / "receipt.json").write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
+        workspace.checkpoint("staged" if build_exit_code == 0 else "failed", build_exit_code)
         print(json.dumps({"build_exit_code": build_exit_code, "mapped_modules": len(mapping), "delta_artifacts": len(artifacts)}))
         return build_exit_code
 
