@@ -118,6 +118,21 @@ class PreparationTests(unittest.TestCase):
                     prep.restore_previous_cache(root, request, root / "cache")
                 downloads.assert_not_called()
 
+    def test_direct_commit_operator_request_keeps_ancestry_discovery_and_checks_checkout(self):
+        with self.cache_history() as (root, _, commits):
+            request = {"pr_head": commits["main"], "expected": {"candidate_head": commits["main"]}}
+            # A request must not silently select caches for a different checkout.
+            with self.assertRaisesRegex(ValueError, "checkout differs"):
+                prep.previous_cache_revisions(root, request)
+            subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach", commits["main"]], check=True)
+            responses, expected = self.published_cache(commits["base"], "OperatorBaseline", "2")
+            cache = root / "cache"
+            cache.mkdir()
+            with patch.object(prep, "get", side_effect=lambda url, **kwargs: responses.get(url)), \
+                    patch.object(prep, "downloads"), redirect_stdout(io.StringIO()):
+                selected = prep.restore_previous_cache(root, request, cache)
+            self.assertEqual(selected.read_bytes(), expected)
+
     def test_identity_uses_git_blobs_and_ignores_documentation_tree(self):
         files = {"lakefile.toml": b"config", "lake-manifest.json": b"manifest",
                  "lean-toolchain": prep.TOOLCHAIN.encode()}

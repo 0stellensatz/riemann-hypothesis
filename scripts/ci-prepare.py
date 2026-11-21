@@ -205,6 +205,12 @@ def previous_cache_revisions(candidate, request):
         raise ValueError("Invalid immutable cache discovery revision")
     def git(*arguments):
         return subprocess.check_output(["git", "-C", str(candidate), *arguments], text=True).splitlines()
+    if git("rev-parse", "HEAD") != [merge]:
+        raise ValueError("Cache discovery checkout differs from the resolved candidate")
+    if head == merge:
+        # Operator prewarm/probe requests can name a direct commit rather than
+        # a proposed PR merge. Preserve their ordinary ancestry discovery.
+        return git("log", "-50", "--format=%H", merge)
     parents = git("rev-list", "--parents", "-n", "1", merge)[0].split()
     if len(parents) != 3 or parents[0] != merge or head not in parents[1:]:
         raise ValueError("Cache discovery requires the resolved PR merge parents")
