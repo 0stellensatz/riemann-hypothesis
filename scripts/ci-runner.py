@@ -91,6 +91,14 @@ def max_map_count(path=Path("/proc/sys/vm/max_map_count")):
         return None
 
 
+def required_commands():
+    commands = {name: shutil.which(name) for name in ("git", "cc", "python3", "bwrap")}
+    # The build workflow prepends this directory before preparing toolchains.
+    search_path = os.pathsep.join((str(Path.home() / ".elan/bin"), os.environ.get("PATH", os.defpath)))
+    commands["elan"] = shutil.which("elan", path=search_path)
+    return commands
+
+
 def doctor(args):
     if sys.platform != "linux":
         raise ValueError("Linux is required")
@@ -101,7 +109,7 @@ def doctor(args):
         "architecture": architecture(),
         "uid": os.getuid(),
         "free_disk_gib": round(shutil.disk_usage(existing).free / 2**30, 1),
-        "commands": {name: shutil.which(name) for name in ("git", "cc", "python3", "bwrap")},
+        "commands": required_commands(),
         "systemd_user": subprocess.run(
             ["systemctl", "--user", "show-environment"], stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL).returncode == 0 if shutil.which("systemctl") else False,
