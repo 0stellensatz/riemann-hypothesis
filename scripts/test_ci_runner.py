@@ -20,6 +20,40 @@ spec.loader.exec_module(runner)
 
 
 class RunnerChecks(unittest.TestCase):
+    def test_missing_elan_is_a_failed_required_command(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            tools = root / "bin"
+            tools.mkdir()
+            for command in ("git", "cc", "python3", "bwrap"):
+                path = tools / command
+                path.touch()
+                path.chmod(0o700)
+            with patch.object(runner.Path, "home", return_value=root), patch.dict(os.environ, {"PATH": str(tools)}):
+                missing = runner.required_commands()
+                self.assertIsNone(missing["elan"])
+                self.assertFalse(all(missing.values()))
+                elan = tools / "elan"
+                elan.touch()
+                elan.chmod(0o700)
+                self.assertEqual(runner.required_commands()["elan"], str(elan))
+                self.assertTrue(all(runner.required_commands().values()))
+
+    def test_elan_home_precedes_path_as_in_the_build_workflow(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            home_bin, other_bin = root / ".elan/bin", root / "bin"
+            home_bin.mkdir(parents=True)
+            other_bin.mkdir()
+            for directory in (home_bin, other_bin):
+                elan = directory / "elan"
+                elan.touch()
+                elan.chmod(0o700)
+            with patch.object(runner.Path, "home", return_value=root), patch.dict(os.environ, {"PATH": str(other_bin)}):
+                self.assertEqual(runner.required_commands()["elan"], str(home_bin / "elan"))
+                (home_bin / "elan").chmod(0o600)
+                self.assertEqual(runner.required_commands()["elan"], str(other_bin / "elan"))
+
     def identity_fixture(self, root):
         installed, source = root / "installed", root / "identity"
         installed.mkdir(mode=0o700); source.mkdir(mode=0o700)
