@@ -54,6 +54,10 @@ source/configuration inputs: equivalent PRs skip compilation, and merging to
 main promotes the same outputs without rebuilding them. No exporter or
 Comparator is run.
 
+Compiler and dependency revisions remain pinned. A PR that changes those inputs
+requires preparing the new trusted toolchain/dependency cache first; CI fails
+rather than executing candidate dependency setup on a volunteer host.
+
 The public cache **includes outputs from untrusted PRs and volunteer machines**.
 Hash and provenance checks protect transport and cache indexing; they do not
 verify proofs. Users who need independent verification must perform a clean

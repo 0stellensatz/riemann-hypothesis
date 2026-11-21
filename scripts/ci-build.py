@@ -25,9 +25,6 @@ import tomllib
 TOOLCHAIN = "leanprover/lean4:v4.33.1"
 DEPENDENCIES = "fee57ee9ed399d0a638ca955e5ad40a37a36eeb9b6dfd9f5964114fa7bbe4774"
 BASE_MANIFEST = "292caa386a620d935cfc736b56fcceaab9fe7073086693b62e899c1ee4725f04"
-WARM_CONFIGS = {"32af981ad33964a949f3e4d1e188e4afd0f85fecf6bf86e8ed133f00f16727ca",
-                "e4686772edd6823c948d7cd6b0dbcf6168e1bfcce9d1e6713f884f646ce4bd0b",
-                "a1b98b41c96ad1e78906a210f5c6806218bda1701356215983033b2f77d44c99"}
 HASH = re.compile(r"[0-9a-f]{16}\Z")
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 MODULE = re.compile(r"[\w']+(?:\.[\w']+)*\Z")
@@ -242,7 +239,7 @@ def validate_packages(project, packages):
                        env=trusted_env(), check=True)
 
 
-def baseline(args, project, cache, config_sha):
+def baseline(args, project, cache):
     if args.baseline_manifest is None:
         return {}, [], None
     if not args.baseline_map or not args.baseline_cache:
@@ -257,7 +254,6 @@ def baseline(args, project, cache, config_sha):
         raise ValueError("baseline metadata/map mismatch")
     mapping = load_map(args.baseline_map)
     hashes, names = {}, set()
-    warm = config_sha in (set(args.warm_config_sha256) or WARM_CONFIGS)
     jobs = []
     for row in rows:
         if not isinstance(row, list) or len(row) != 4 or not all(isinstance(x, str) for x in row):
@@ -270,8 +266,6 @@ def baseline(args, project, cache, config_sha):
         if filename in hashes and hashes[filename] != digest:
             raise ValueError("conflicting baseline archive digest")
         hashes[filename] = digest
-        if not warm:
-            continue
         module = Path(*name.split("."))
         source = project / "src" / module.with_suffix(".lean")
         if not source.is_file():
@@ -432,7 +426,6 @@ def main():
     parser.add_argument("--baseline-manifest-sha256", default=BASE_MANIFEST)
     parser.add_argument("--baseline-map", type=Path)
     parser.add_argument("--baseline-cache", type=Path)
-    parser.add_argument("--warm-config-sha256", action="append", default=[])
     parser.add_argument("--cache-map", type=Path, action="append", default=[],
                         help="newer PR/ancestor map; LTARs must already be in --baseline-cache")
     args = parser.parse_args()
@@ -473,7 +466,9 @@ def main():
             raise ValueError("dependencies must come from a trusted cache outside the candidate checkout")
         validate_packages(project, packages)
         provenance.update(lakefile_sha256=config_sha, manifest_sha256=sha256(project / "lake-manifest.json"))
-        base_hashes, warm_jobs, base_map_sha = baseline(args, project, cache, config_sha)
+        # validate_inputs has checked layout/toolchain/dependencies. Stock
+        # --rehash checks semantic options and clears stale module LTARs.
+        base_hashes, warm_jobs, base_map_sha = baseline(args, project, cache)
         base_mapping = load_map(args.baseline_map) if args.baseline_map else {}
         extra_maps = prepare_cache_maps(args, base_mapping, cache, control, toolchain, work)
         (project / ".lake/packages").mkdir(parents=True, exist_ok=True)

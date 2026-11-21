@@ -171,12 +171,10 @@ roots = ["Base", "Stable", "Main"]
         probe = 'import Lean\nrun_elab do\n  let result ← IO.Process.output {cmd := "python3", args := #[' + json.dumps("-c") + ", " + json.dumps(python_probe) + ']}\n  unless result.exitCode == 0 do throwError "sandbox probe failed: {result.stderr}"\n'
         (root / "src/Base.lean").write_text(probe + "def value : Nat := 9\n")
         commit()
-        config_hash = ci.sha256(root / "lakefile.toml")
         invocation = [sys.executable, str(here.parent / "ci-build.py"), "--candidate", str(root), "--packages", str(packages),
                       "--dependency-manifest-sha256", ci.sha256(root / "lake-manifest.json"),
                       "--baseline-manifest", str(baseline), "--baseline-manifest-sha256", ci.sha256(baseline),
-                      "--baseline-map", str(base_map), "--baseline-cache", str(cache),
-                      "--warm-config-sha256", config_hash, "--jobs", "2"]
+                      "--baseline-map", str(base_map), "--baseline-cache", str(cache), "--jobs", "2"]
         host_env = {**os.environ, "CI_HOST_SECRET": "not-for-candidate", "AWS_SECRET_ACCESS_KEY": "not-for-candidate"}
 
         def build(label, extra=(), succeeds=True):
