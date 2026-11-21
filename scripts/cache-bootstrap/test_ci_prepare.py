@@ -37,6 +37,25 @@ def record(identity):
 
 
 class PreparationTests(unittest.TestCase):
+    def test_existing_433_state_remains_warm_and_436_is_isolated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            baseline = root / "baseline"
+            baseline.mkdir()
+            marker = baseline / "already-downloaded"
+            marker.write_text("verified cache")
+            for release in ("leanprover/lean4:v4.33.1", "leanprover/lean4:v4.36.0"):
+                with self.subTest(release=release), patch.object(prep, "TOOLCHAIN", release), \
+                        patch.object(prep.settings, "TOOLCHAIN_DIR", release.replace("/", "--").replace(":", "---")):
+                    state = prep.preparation_state(root)
+                    if release.endswith(":v4.33.1"):
+                        self.assertEqual(state, root)
+                        self.assertEqual((state / "baseline/already-downloaded").read_text(), "verified cache")
+                    else:
+                        self.assertTrue(state.is_relative_to(root))
+                        self.assertNotEqual(state, root)
+                        self.assertFalse((state / "baseline/already-downloaded").exists())
+
     def test_other_approved_toolchain_ancestor_is_skipped_without_fetching_its_artifacts(self):
         for active, historical in (("leanprover/lean4:v4.33.1", "leanprover/lean4:v4.36.0"),
                                    ("leanprover/lean4:v4.36.0", "leanprover/lean4:v4.33.1")):

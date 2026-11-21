@@ -251,10 +251,16 @@ def restore_previous_cache(candidate, request, cache):
     return None
 
 
+def preparation_state(directory):
+    state = Path(directory).expanduser().resolve()
+    # Keep the deployed 4.33 cache warm; only later releases need a new namespace.
+    return state if TOOLCHAIN == "leanprover/lean4:v4.33.1" else state / settings.TOOLCHAIN_DIR
+
+
 def prepare(args):
     trusted = Path(args.trusted).resolve()
     settings.require_baseline()
-    state = Path(args.state).expanduser().resolve() / settings.TOOLCHAIN_DIR
+    state = preparation_state(args.state)
     state.mkdir(parents=True, exist_ok=True)
     with (state / "prepare.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
