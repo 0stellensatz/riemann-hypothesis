@@ -1,3 +1,6 @@
+# Cache infrastructure; the original submission starts below this block.
+platformIndependent = true
+
 name = "tree"
 srcDir = "src"
 defaultTargets = ["BuildAid", "CompanionTheory", "Development", "Formalism", "GroundTheory", "GroundTheoryFields", "Lemmata", "PositivityTheory", "ReciprocityTheory", "Supplements", "Main"]

@@ -2,12 +2,12 @@
 
 [![checks](https://github.com/Deicyde/riemann-hypothesis/actions/workflows/checks.yml/badge.svg)](https://github.com/Deicyde/riemann-hypothesis/actions/workflows/checks.yml)
 
-A [Comparator](https://github.com/leanprover/comparator) setup for the Lean formalization that
+A [Comparator](https://github.com/leanprover/comparator) setup and community build cache for the Lean formalization that
 claims a proof of the Riemann Hypothesis, and of GRH for Dirichlet L-functions, announced on
 2026-11-20 at <https://alpo.ge/remark.pdf>.
 
-This repository is the submission, unmodified, plus what Comparator needs and the submission
-does not include:
+The submitted Lean source is unmodified. This repository adds Comparator files and cache
+infrastructure:
 
 | File | What it is |
 |---|---|
@@ -15,6 +15,27 @@ does not include:
 | [`comparator.json`](comparator.json) | the Comparator config |
 | [`export-targets.txt`](export-targets.txt) | the declarations to export |
 | [`verification/`](verification/NOTES.md) | our notes, and the results once there are some |
+| [`scripts/`](scripts/) | public Lake cache configuration and reproducible bootstrap/publishing tools |
+
+## Using the build cache
+
+Fetch Mathlib's dependencies, then this project's compiled modules:
+
+```bash
+MATHLIB_CACHE_GET_URL=https://cache.mathlib.org/mathlib4 lake exe cache get
+source scripts/cache-env.sh
+lake cache get --repo leanprover-community/riemann-hypothesis
+lake build Main
+```
+
+The last command restores the cached outputs to `.lake/build`; subsequent builds compile changed
+modules and their dependents. Downloads are anonymous. `lake cache get` is Lake's native artifact
+cache; `lake exe cache get` is Mathlib's separate cache tool. Lake requires `--repo` to select this
+root package. The cache contains portable Lean outputs and generated C, with no native objects.
+
+The [cache notes](verification/CACHE.md) describe the pinned published archive, the cheaper
+bootstrap that reuses its proofs, and how to produce and publish future caches. For independent
+verification, follow the clean-build instructions below.
 
 ## What is claimed
 
@@ -30,6 +51,7 @@ does not include:
 
 ```bash
 export LEAN_ABORT_ON_PANIC=1   # as Comparator sets it: stop on an internal error, don't continue
+export LAKE_ARTIFACT_CACHE=false   # rebuild the submission even if cache-env.sh was sourced earlier
 export MATHLIB_CACHE_GET_URL=https://cache.mathlib.org/mathlib4   # Mathlib's current cache server
 
 # 1. Export the challenge. Clean clone at $CLEAN, Lean v4.33.1.
