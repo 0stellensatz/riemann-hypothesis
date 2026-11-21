@@ -23,6 +23,7 @@ MATHLIB_CACHE_GET_URL="${MATHLIB_CACHE_GET_URL:-https://cache.mathlib.org/mathli
   lake exe mathlib/cache get
 
 # Cache URLs live in lakefile.toml; users need no separate configuration file.
+export LAKE_CACHE_DIR="$RH_CACHE_ROOT/.lake/cache"
 source scripts/cache-env.sh
 RH_CACHE_CURL_HOME="$(mktemp -d "$PWD/.lake/cache-curl.XXXXXX")"
 trap 'rm -rf -- "$RH_CACHE_CURL_HOME"' EXIT
