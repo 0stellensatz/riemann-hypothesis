@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -38,7 +39,7 @@ def main():
         root, flat, metadata = directory / "project", directory / "native", directory / "metadata"
         (root / "src").mkdir(parents=True)
         (root / "src/Main.lean").write_text("def answer : Nat := 42\n")
-        (root / "src/Second.lean").write_text("theorem second : True := True.intro\n")
+        (root / "src/Second.lean").write_text("module\npublic section\ntheorem second : True := True.intro\n")
         (root / "lean-toolchain").write_text(stage.ci.TOOLCHAIN + "\n")
         (root / "lakefile.toml").write_text('name="completedFixture"\nsrcDir="src"\nplatformIndependent=true\ndefaultTargets=["Main", "Second"]\n[[lean_lib]]\nname="Main"\n[[lean_lib]]\nname="Second"\n')
         (root / "lake-manifest.json").write_text(json.dumps({"version": "1.3.0", "packagesDir": ".lake/packages", "packages": []}))
@@ -87,6 +88,23 @@ def main():
         assert report["mapping_entries"] == 2
         manifest = metadata / "modules.jsonl.gz"
         publisher.validate_module_manifest(manifest, contents, flat)
+        # Stock LTARs retain module-system server/private OLeans and IR parts.
+        assert (root / ".lake/build/lib/lean/Second.olean.private").exists()
+        assert (root / ".lake/build/lib/lean/Second.olean.server").exists()
+        originals = {path.relative_to(root / ".lake/build"): path.read_bytes()
+                     for path in (root / ".lake/build").rglob("Second.*")
+                     if path.name in ("Second.olean", "Second.olean.server", "Second.olean.private", "Second.ilean", "Second.ir", "Second.ir.sig", "Second.c")}
+        shutil.rmtree(root / ".lake/build")
+        lib, ir = root / ".lake/build/lib/lean", root / ".lake/build/ir"
+        lib.mkdir(parents=True); ir.mkdir(parents=True)
+        rows = [json.loads(line) for line in gzip.decompress(manifest.read_bytes()).splitlines()[1:]]
+        lean = Path(subprocess.check_output(["elan", "which", "lean"], cwd=root, env=environment, text=True).strip())
+        jobs = [{"file": str(flat / row[2]), "hash": row[1], "base": [str(lib), str(ir)]} for row in rows]
+        subprocess.run([str(lean.with_name("leantar")), "--jobs", "2", "-f", "-x", "-j", "-"],
+                       input=json.dumps(jobs), text=True, env={**environment, "RUST_MIN_STACK": "8388608"}, check=True)
+        for relative, value in originals.items():
+            assert (root / ".lake/build" / relative).read_bytes() == value
+        subprocess.run(["lake", "--no-build", "--rehash", "build"], cwd=root, env=environment, check=True)
         with patch.object(publisher.settings, "for_toolchain", return_value=selected):
             publisher.validate_build_receipt(metadata / "build-receipt.json", manifest.read_bytes(), contents, git("rev-parse", "HEAD"))
             rejects(lambda: publisher.validate_build_receipt(metadata / "build-receipt.json", manifest.read_bytes(), contents, "0" * 40))
