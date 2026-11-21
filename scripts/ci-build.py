@@ -779,8 +779,6 @@ def main():
             existing.update(verified)
             mapping_file.write_text(json.dumps(SCHEMA) + "\n" +
                                    "".join(json.dumps(row) + "\n" for row in sorted(existing.items())))
-        if build_exit_code and not mapping_file.exists() and not mapping_file.is_symlink():
-            recover_completed_map(project, cache, toolchain, work, mapping_file, base_hashes, known_mappings=known_mappings)
         mapping_file = safe_file(result, "outputs.jsonl")
         mapping = load_map(mapping_file)
         # Lean 4.33.1 omits the portable flag when reusing arts.ltar?, so -o
