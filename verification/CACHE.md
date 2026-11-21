@@ -64,6 +64,16 @@ lake build
 
 Downloads populate mappings and compressed artifacts; builds restore required outputs and compile changed files. Public reads require no upload credential.
 
+For the unchanged pinned source tree, an optional bulk restore avoids starting `leantar` separately for each module:
+
+```bash
+lake cache get --repo leanprover-community/riemann-hypothesis
+python3 scripts/restore-cache.py
+lake --no-build --rehash build Main
+```
+
+The helper downloads a SHA256-pinned module manifest, checks source/configuration and every completed cached archive's SHA256, then calls stock `leantar` once with 24 workers. It rejects incomplete downloads and source/output symlinks, performs no compilation, and needs no credentials. Use ordinary `lake build` for changed sources. A full local bulk restore and subsequent stock no-build graph check passed; the helper's small fixture is `python3 scripts/cache-bootstrap/test_restore.py`.
+
 ## Publish a completed cache
 
 The bootstrap is pinned to the original submission. Publish its validated staging directory from a separate host holding the upload credential:

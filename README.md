@@ -33,6 +33,9 @@ modules and their dependents. Downloads are anonymous. `lake cache get` is Lake'
 cache; `lake exe cache get` is Mathlib's separate cache tool. Lake requires `--repo` to select this
 root package. The cache contains portable Lean outputs and generated C, with no native objects.
 
+For a faster first restore of the unchanged submission, run `python3 scripts/restore-cache.py`
+after downloading the cache and before `lake build Main`. It unpacks all modules in one batch.
+
 The [cache notes](verification/CACHE.md) describe the pinned published archive, the cheaper
 bootstrap that reuses its proofs, and how to produce and publish future caches. For independent
 verification, follow the clean-build instructions below.
