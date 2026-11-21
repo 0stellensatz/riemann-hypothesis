@@ -90,10 +90,10 @@ def resolve(args):
         selected_head = selected_head or pr["head"]["sha"]
         if pr["head"]["sha"] != selected_head:
             raise ValueError("PR head changed before this job started; a newer run will build it")
-        if pr.get("mergeable") is False:
+        if pr.get("mergeable") is False and not pr.get("merged"):
             raise ValueError("PR has no available merge result")
         revision = pr.get("merge_commit_sha")
-        if revision and pr.get("mergeable") is True:
+        if revision and (pr.get("mergeable") is True or pr.get("merged") is True):
             break
         if attempt == 4:
             raise ValueError("GitHub has not finished computing the PR merge result; retry this job")
@@ -102,7 +102,8 @@ def resolve(args):
         raise ValueError("Invalid candidate merge revision")
     result = identity(revision)
     commit = api("git/commits/" + revision)
-    if pr["head"]["sha"] not in [parent["sha"] for parent in commit["parents"]]:
+    parents = {parent["sha"] for parent in commit["parents"]}
+    if pr["head"]["sha"] not in parents or (not pr.get("merged") and pr["base"]["sha"] not in parents):
         raise ValueError("Candidate is not the expected PR merge result")
     request = {"repository": REPO, "run_id": int(os.environ.get("GITHUB_RUN_ID", "0")),
                "pr_number": args.pr, "pr_head": pr["head"]["sha"], "expected": result}
@@ -163,7 +164,8 @@ def downloads(cache, entries, sha256s):
     missing = []
     for name in sorted(set(entries.values())):
         path = artifacts / name
-        if not LTAR.fullmatch(name) or not publication.SHA256.fullmatch(sha256s.get(name, "")):
+        if (not LTAR.fullmatch(name) or not isinstance(sha256s.get(name), str) or
+                not publication.SHA256.fullmatch(sha256s[name])):
             raise ValueError("Invalid archive filename or missing manifest digest")
         if path.is_file() and not path.is_symlink():
             with path.open("rb") as stream:
