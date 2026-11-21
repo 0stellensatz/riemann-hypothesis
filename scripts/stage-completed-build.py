@@ -21,6 +21,9 @@ import tempfile
 SPEC = importlib.util.spec_from_file_location("completed_ci_build", Path(__file__).with_name("ci-build.py"))
 ci = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ci)
+RUN_SPEC = importlib.util.spec_from_file_location("stock_complete_build", Path(__file__).with_name("run-complete-build.py"))
+complete = importlib.util.module_from_spec(RUN_SPEC)
+RUN_SPEC.loader.exec_module(complete)
 
 
 def main():
@@ -28,6 +31,9 @@ def main():
     parser.add_argument("--project", type=Path, required=True)
     parser.add_argument("--build-map", type=Path, required=True)
     parser.add_argument("--build-log", type=Path, required=True)
+    parser.add_argument("--build-receipt", type=Path, required=True,
+                        help="fresh run-complete-build.py receipt for the full default-target build")
+    parser.add_argument("--cache-dir", type=Path, help="completed native LTAR cache for modules without a local IR alias")
     parser.add_argument("--output", type=Path, required=True, help="flat native Lake staging")
     parser.add_argument("--metadata", type=Path, required=True, help="separate module manifest/provenance directory")
     parser.add_argument("--toolchain", type=Path)
@@ -51,6 +57,10 @@ def main():
     if not re.search(rb"Build completed successfully \([0-9]+ jobs\)\.", log.read_bytes()):
         raise ValueError("the supplied stock build log does not record successful completion")
     mapping_file = ci.safe_file(args.build_map.parent.resolve(), args.build_map.name)
+    receipt_file = ci.safe_file(args.build_receipt.parent.resolve(), args.build_receipt.name)
+    receipt = json.loads(receipt_file.read_text())
+    current = complete.identity(project, selected)
+    complete.validate_receipt(receipt, current, selected, log, mapping_file)
     mapping = ci.load_map(mapping_file)
     if not mapping:
         raise ValueError("the successful build's stock -o map is empty")
@@ -75,7 +85,12 @@ def main():
         if dep_hash in seen:
             raise ValueError("multiple modules claim one build input hash")
         seen.add(dep_hash)
-        archive = ci.safe_file(project / ".lake/build/ir", str(module.parent / (module.name + ".ltar")))
+        try:
+            archive = ci.safe_file(project / ".lake/build/ir", str(module.parent / (module.name + ".ltar")))
+        except FileNotFoundError:
+            if args.cache_dir is None:
+                raise ValueError("module LTAR alias absent; supply its completed native --cache-dir") from None
+            archive = ci.safe_file(args.cache_dir.resolve(), "artifacts/" + mapping[dep_hash])
         alias = output / mapping[dep_hash]
         if not alias.exists():
             try:
@@ -93,6 +108,9 @@ def main():
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
         hashes = dict(zip((path.name for path in paths), pool.map(ci.sha256, paths)))
     contents = mapping_file.read_bytes()
+    if complete.identity(project, selected) != current:
+        raise ValueError("build inputs changed during completed-artifact staging")
+    complete.validate_receipt(receipt, current, selected, log, mapping_file)
     (output / "outputs.jsonl").write_bytes(contents)
     inputs = {"source_tree": ci.git(project, "rev-parse", "HEAD:src"), "build_roots": {},
               "lakefile_sha256": ci.sha256(project / "lakefile.toml"),
@@ -109,9 +127,11 @@ def main():
     summary = {"schema": 1, "validation": "completed stock build; actual compressed bytes checked with stock Lake hash and SHA256",
                "candidate_head": revision, "candidate_tree": ci.git(project, "rev-parse", "HEAD^{tree}"), **inputs,
                "input_fingerprint": fingerprint, "build_log_sha256": ci.sha256(log),
+               "build_receipt_sha256": ci.sha256(receipt_file),
                "modules": len(modules), "artifacts": len(paths), "artifact_bytes": sum(path.stat().st_size for path in paths),
                "baseline": {"revision": revision, "map_sha256": map_sha, "manifest_sha256": ci.sha256(manifest)}}
     (metadata / "completed-build.json").write_text(json.dumps(summary, sort_keys=True, indent=2) + "\n")
+    shutil.copyfile(receipt_file, metadata / "build-receipt.json")
     print(json.dumps(summary, sort_keys=True), flush=True)
 
 

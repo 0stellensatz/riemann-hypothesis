@@ -142,6 +142,31 @@ def validate_module_manifest(path: Path, contents: bytes, staging: Path) -> byte
     return value
 
 
+def validate_build_receipt(path: Path, module_manifest: bytes, contents: bytes, revision: str) -> None:
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 2 * 1024**2:
+        raise ValueError("Expected a bounded regular complete-build receipt")
+    receipt = json.loads(path.read_bytes())
+    with gzip.GzipFile(fileobj=io.BytesIO(module_manifest)) as stream:
+        header = json.loads(stream.readline(2 * 1024**2))
+    selected = settings.for_toolchain(TOOLCHAIN)
+    fields = ("source_tree", "build_roots", "lakefile_sha256", "manifest_sha256", "toolchain")
+    if (receipt.get("schema") != 1 or receipt.get("kind") != "stock-default-target-build" or
+            receipt.get("scope") != "default-targets" or receipt.get("command") != ["lake", "--rehash", "build", "-o", "<outputs>"] or
+            receipt.get("build_exit_code") != 0 or receipt.get("candidate_head") != revision or
+            receipt.get("toolchain_commit") != selected.COMMIT or receipt.get("manifest_sha256") != selected.DEPENDENCIES or
+            receipt.get("map_sha256") != hashlib.sha256(contents).hexdigest() or
+            any(receipt.get(key) != header.get(key) for key in fields) or
+            not isinstance(receipt.get("default_targets"), list) or not receipt["default_targets"] or
+            not all(isinstance(target, str) and target for target in receipt["default_targets"])):
+        raise ValueError("Publication receipt does not bind this revision's complete default build and module index")
+    if (re.fullmatch(r"[0-9a-f]{40}", str(receipt.get("candidate_tree"))) is None or
+            re.fullmatch(r"[0-9a-f]{64}", str(receipt.get("build_log_sha256"))) is None):
+        raise ValueError("Invalid complete-build provenance")
+    fingerprint = hashlib.sha256(json.dumps({key: header[key] for key in fields}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if header.get("input_fingerprint") != fingerprint:
+        raise ValueError("Module index build-input fingerprint mismatch")
+
+
 def private_file(path: Path) -> str:
     metadata = path.stat(follow_symlinks=False)
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
@@ -347,14 +372,16 @@ def main() -> None:
     parser.add_argument("--mirror-dir", type=Path, help="also mirror the pinned published archive and manifest")
     parser.add_argument("--module-manifest", type=Path,
                         help="publish a verified completed-build bulk restore index alongside this revision")
+    parser.add_argument("--build-receipt", type=Path,
+                        help="run-complete-build.py receipt, required for a new release baseline")
     parser.add_argument("--check-only", action="store_true", help="validate data without credentials or uploads")
     parser.add_argument("--map-only-after-sync", action="store_true",
                         help="verify all staged artifacts already exist in R2, then upload only the revision map")
     parser.add_argument("--platform", help="also scope this map to a platform (requires --map-only-after-sync)")
     args = parser.parse_args()
     select_toolchain(args.release)
-    if TOOLCHAIN != "leanprover/lean4:v4.33.1" and args.module_manifest is None:
-        parser.error("a completed-build --module-manifest is required for this release's cache namespace")
+    if TOOLCHAIN != "leanprover/lean4:v4.33.1" and (args.module_manifest is None or args.build_receipt is None):
+        parser.error("completed-build --module-manifest and --build-receipt are required for this release's cache namespace")
     if not re.fullmatch(r"[0-9a-f]{40}", args.revision):
         parser.error("--rev must be a full lowercase Git commit hash")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", args.repo):
@@ -364,6 +391,10 @@ def main() -> None:
     staging = args.staging.absolute()
     contents, report = validate_staging(staging)
     module_manifest = validate_module_manifest(args.module_manifest, contents, staging) if args.module_manifest else None
+    if args.build_receipt:
+        if module_manifest is None:
+            parser.error("--build-receipt requires --module-manifest")
+        validate_build_receipt(args.build_receipt, module_manifest, contents, args.revision)
     if args.mirror_dir:
         check_mirror(args.mirror_dir)
     print(json.dumps({"validated": True, "revision": args.revision, **report}), flush=True)
