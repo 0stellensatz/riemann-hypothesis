@@ -151,6 +151,7 @@ def validate_build_receipt(path: Path, module_manifest: bytes, contents: bytes, 
     selected = settings.for_toolchain(TOOLCHAIN)
     fields = ("source_tree", "build_roots", "lakefile_sha256", "manifest_sha256", "toolchain")
     if (receipt.get("schema") != 1 or receipt.get("kind") != "stock-default-target-build" or
+            receipt.get("input_attestation") != "git-blobs-and-locked-dependencies-v1" or
             receipt.get("scope") != "default-targets" or receipt.get("command") != ["lake", "--rehash", "build", "-o", "<outputs>"] or
             receipt.get("build_exit_code") != 0 or receipt.get("candidate_head") != revision or
             receipt.get("toolchain_commit") != selected.COMMIT or receipt.get("manifest_sha256") != selected.DEPENDENCIES or

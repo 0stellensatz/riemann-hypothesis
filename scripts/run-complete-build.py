@@ -15,11 +15,13 @@ SPEC = importlib.util.spec_from_file_location("complete_build_ci", Path(__file__
 ci = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ci)
 COMMAND = ["lake", "--rehash", "build", "-o", "<outputs>"]
+INPUT_ATTESTATION = "git-blobs-and-locked-dependencies-v1"
 
 
 def identity(project, selected):
     ci.TOOLCHAIN = selected.TOOLCHAIN
     ci.validate_inputs(project, selected.DEPENDENCIES)
+    head = ci.git(project, "rev-parse", "HEAD")
     subprocess.run(["git", "-C", str(project), "diff", "--no-ext-diff", "--no-textconv", "--quiet", "HEAD",
                     "--", "src", "lakefile.toml", "lake-manifest.json", "lean-toolchain"], check=True)
     if ci.git(project, "ls-files", "--others", "--", "src"):
@@ -27,9 +29,20 @@ def identity(project, selected):
     inventory = subprocess.check_output(["git", "-C", str(project), "ls-tree", "-r", "-z", "HEAD", "--", "src"], env=ci.trusted_env())
     if any(entry.split(b" ", 1)[0] not in (b"100644", b"100755") for entry in inventory.split(b"\0") if entry):
         raise ValueError("complete builds reject source symlinks and submodules")
-    return {"candidate_head": ci.git(project, "rev-parse", "HEAD"),
-            "candidate_tree": ci.git(project, "rev-parse", "HEAD^{tree}"),
-            "source_tree": ci.git(project, "rev-parse", "HEAD:src"), "build_roots": {},
+    ci.verify_snapshot(project, head, project)
+    # A manifest pin does not establish that the actual package sources still
+    # match their locked commits. Resolve the shared parent once; do not hash
+    # generated .lake caches or copy the author's dependency build outputs.
+    packages = (project / ".lake/packages").resolve()
+    ci.validate_packages(project, packages)
+    ci.verify_private_packages(project, packages, packages)
+    for package in json.loads((project / "lake-manifest.json").read_text()).get("packages", []):
+        if ci.git(packages / package["name"], "ls-files", "--others", "--exclude=.lake/", "--exclude=node_modules/",
+                  "--", "*.lean", "lakefile.toml", "lake-manifest.json", "lean-toolchain"):
+            raise ValueError("complete builds reject untracked dependency Lean/config inputs")
+    return {"candidate_head": head,
+            "candidate_tree": ci.git(project, "rev-parse", head + "^{tree}"),
+            "source_tree": ci.git(project, "rev-parse", head + ":src"), "build_roots": {},
             "lakefile_sha256": ci.sha256(project / "lakefile.toml"),
             "manifest_sha256": ci.sha256(project / "lake-manifest.json"), "toolchain": selected.TOOLCHAIN,
             "default_targets": tomllib.loads((project / "lakefile.toml").read_text())["defaultTargets"]}
@@ -37,6 +50,7 @@ def identity(project, selected):
 
 def validate_receipt(receipt, current, selected, log, mapping):
     if (receipt.get("schema") != 1 or receipt.get("kind") != "stock-default-target-build" or
+            receipt.get("input_attestation") != INPUT_ATTESTATION or
             receipt.get("scope") != "default-targets" or receipt.get("command") != COMMAND or
             receipt.get("build_exit_code") != 0 or receipt.get("toolchain_commit") != selected.COMMIT or
             any(receipt.get(key) != value for key, value in current.items()) or
@@ -87,6 +101,7 @@ def main():
     if not ci.load_map(mapping):
         raise ValueError("the completed default-target build emitted an empty map")
     value = {"schema": 1, "kind": "stock-default-target-build", "scope": "default-targets", "command": COMMAND,
+             "input_attestation": INPUT_ATTESTATION,
              **before, "default_targets": tomllib.loads((project / "lakefile.toml").read_text())["defaultTargets"],
              "toolchain_commit": selected.COMMIT, "build_exit_code": 0,
              "build_log_sha256": ci.sha256(log), "map_sha256": ci.sha256(mapping)}
