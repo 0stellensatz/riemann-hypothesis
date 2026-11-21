@@ -9,7 +9,7 @@ project configuration, executable or proof is imported here.
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import gzip
 import hashlib
 import importlib.util
@@ -21,6 +21,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 
 _SPEC = importlib.util.spec_from_file_location("rh_cache_transport", Path(__file__).with_name("publish-lake-cache.py"))
@@ -36,6 +37,8 @@ ROOT = re.compile(r"[A-Za-z0-9_-]+(?:/[A-Za-z0-9_.-]+)*\Z")
 MAX_JSON = 64 * 1024 * 1024
 MAX_ARTIFACT = 1024 * 1024 * 1024
 MAX_ENTRIES = 500000
+MAX_UPLOAD_WORKERS = 32
+UPLOAD_PROGRESS_INTERVAL = 250
 REVALIDATE = "no-cache"
 BASE_MANIFEST_SHA256 = "292caa386a620d935cfc736b56fcceaab9fe7073086693b62e899c1ee4725f04"
 BASE_MANIFEST_URL = transport.PUBLIC_BASE_URL + "/bootstrap/e50d09817ad81469f737e8f637561e6ccf86c670/modules.jsonl.gz"
@@ -514,7 +517,9 @@ def update_map(store, revision: str, contents: bytes, record: dict, *, alias=Fal
     raise ValueError("Concurrent cache publications did not settle; no unconditional overwrite attempted")
 
 
-def publish(prepared: dict, store) -> dict:
+def publish(prepared: dict, store, *, upload_workers=MAX_UPLOAD_WORKERS) -> dict:
+    if type(upload_workers) is not int or not 1 <= upload_workers <= MAX_UPLOAD_WORKERS:
+        raise ValueError(f"upload_workers must be an integer from 1 to {MAX_UPLOAD_WORKERS}")
     expected, receipt = prepared["expected"], prepared["receipt"]
     paths = prepared["paths"]
     metadata = {item["file"]: item for item in receipt["artifacts"]}
@@ -523,8 +528,13 @@ def publish(prepared: dict, store) -> dict:
         immutable(store, f"artifacts/{transport.REPOSITORY}/{name[:16]}.art", path,
                   content_type=transport.ARTIFACT_CONTENT_TYPE,
                   metadata={"sha256": metadata[name]["sha256"]}, maximum=MAX_ARTIFACT)
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        list(pool.map(upload, paths.items()))
+    print(f"Uploading {len(paths)} cache artifacts with {upload_workers} workers", file=sys.stderr, flush=True)
+    with ThreadPoolExecutor(max_workers=upload_workers) as pool:
+        futures = [pool.submit(upload, item) for item in paths.items()]
+        for completed, future in enumerate(as_completed(futures), 1):
+            future.result()
+            if completed % UPLOAD_PROGRESS_INTERVAL == 0 or completed == len(paths):
+                print(f"Uploaded {completed}/{len(paths)} cache artifacts", file=sys.stderr, flush=True)
     # Names and digests already live in the complete module manifest. Keep the
     # discovery receipt small even when a build changes the whole project.
     public_receipt = {key: value for key, value in receipt.items() if key != "artifacts"}
@@ -608,6 +618,8 @@ def main():
         credentials.add_argument("--credentials-file", type=Path)
         if name == "publish":
             command.add_argument("staging", type=Path)
+            command.add_argument("--upload-workers", type=int, choices=range(1, MAX_UPLOAD_WORKERS + 1),
+                                 default=MAX_UPLOAD_WORKERS, help="bounded concurrent artifact uploads (default: %(default)s)")
             command.add_argument("--base-map", type=Path, help="optional local map, still checked against trusted SHA256")
             command.add_argument("--base-manifest", type=Path, help="optional local initial module manifest, still checked against its fixed SHA256")
         else:
@@ -624,7 +636,7 @@ def main():
                 print(json.dumps({"validated": True, "delta_artifacts": len(prepared["paths"]), "map_entries": len(prepared["entries"])}))
                 return
             store = S3Store(temporary, args.token_file, args.credentials_file)
-            result = publish(prepared, store)
+            result = publish(prepared, store, upload_workers=args.upload_workers)
         else:
             if not SHA40.fullmatch(args.from_rev):
                 parser.error("--from-rev must be a full lowercase commit hash")
