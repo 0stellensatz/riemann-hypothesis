@@ -34,7 +34,7 @@ def main():
         'PATH': str(toolchain / 'bin') + ':/usr/bin:/bin:/run/current-system/sw/bin',
         'HOME': '/tmp/native-home', 'TMPDIR': '/tmp', 'LANG': 'C.UTF-8',
         'LEAN_SYSROOT': str(toolchain), 'LAKE_HOME': str(toolchain),
-        'LEAN_NUM_THREADS': str(jobs), 'LAKE_NO_CACHE': 'true',
+        'LEAN_NUM_THREADS': str(jobs), 'LAKE_NO_CACHE': 'true', 'LAKE_ARTIFACT_CACHE': 'false',
         'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
         'RUST_MIN_STACK': '8388608',
     }

@@ -37,12 +37,12 @@ permissions:
 # heads may use separate available runners; repeat events for one head coalesce.
 # Manual dispatches serialize separately because they resolve the head at runtime.
 concurrency:
-  group: rh-build-pr-${{ github.event.pull_request.number || inputs.pr_number }}-${{ github.event.pull_request.head.sha || 'manual' }}
+  group: rh-build-pr-${{ github.event.pull_request.number || inputs.pr_number }}-${{ inputs.mode == 'native-proof' && format('native-proof-{0}', inputs.proof_seed_sha256) || github.event.pull_request.head.sha || 'manual' }}
   cancel-in-progress: false
 
 jobs:
   resolve:
-    if: ${{ inputs.mode != 'native-proof' }}
+    if: ${{ inputs.mode != 'native-proof' && (github.event_name == 'workflow_dispatch' || vars.RH_CI_MANUAL_ONLY != 'true') }}
     runs-on: ubuntu-latest
     outputs:
       candidate: ${{ steps.resolve.outputs.candidate }}

@@ -18,6 +18,7 @@ def main():
     parser = argparse.ArgumentParser()
     for name in ('dependency-root', 'toolchain', 'worklist', 'project-config'):
         parser.add_argument('--' + name, required=True, type=Path)
+    parser.add_argument('--receipt', type=Path)
     args = parser.parse_args()
     dependencies, toolchain = args.dependency_root.resolve(), args.toolchain.resolve()
     allowed = sorted(rpc.proof_worklist(args.worklist))
@@ -72,14 +73,23 @@ def main():
         assert process.returncode == 0
         value = rpc.read(result)
         assert value['ok'] and value['modules'][0]['ok']
+        native_parts=[]
+        for suffix in rpc.PROOF_PARTS:
+            part='ir' if suffix=='.c' else 'lib/lean'
+            path=output/'seed/.lake/build'/part/Path(*name.split('.')).with_suffix(suffix)
+            assert path.is_file(), 'successful Mathlib proof lacks '+suffix
+            native_parts.append({'suffix':suffix,'bytes':path.stat().st_size,'sha256':rpc.digest(path)})
         for path, sha in before.items():
             assert rpc.digest(path) == sha, 'original dependency bytes changed'
         upper_files = [path for path in (output / 'dependency-overlays').rglob('*') if path.is_file()]
         assert upper_files, 'pilot did not exercise writable dependency sidecars'
-        print(json.dumps({'stock_mathlib_proof': 'PASS', 'original_dependency_sample_bytes_unchanged': True,
+        receipt={'stock_mathlib_proof': 'PASS', 'original_dependency_sample_bytes_unchanged': True,
                           'private_upper_files': len(upper_files),
                           'private_sidecar_samples': [str(p.relative_to(output)) for p in upper_files[:12]],
-                          'production_bwrap_overlay_namespace': True, 'live_project_modified': False}))
+                          'production_bwrap_overlay_namespace': True, 'live_project_modified': False,
+                          'native_output_parts':native_parts,'native_output_part_count':len(native_parts)}
+        if args.receipt:rpc.atomic(args.receipt,receipt)
+        print(json.dumps(receipt))
 
 if __name__ == '__main__':
     main()
