@@ -38,6 +38,8 @@ def prepare(trusted, candidate, control, state, runner):
     lean = subprocess.check_output(['elan', 'which', 'lean'], env=environment, text=True).strip()
     lease['worker'].update(dependency_root=paths['packages'], toolchain_root=str(Path(lean).parent.parent),
                            baseline_cache_root=paths['baseline_cache'])
+    key=rpc.rawsha({'baseline':baseline,'worklist':rpc.proof_policy()['worklist_sha256']})
+    lease['worker']['expanded_base_root']=str(state/'proof-bases'/key)
     rpc.atomic(control / 'lease.json', lease)
     for name in ['build', 'packages']:
         (candidate / '.lake' / name).mkdir(parents=True, exist_ok=True)

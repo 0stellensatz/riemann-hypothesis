@@ -303,8 +303,8 @@ def worker(root, control, output, producer, run_id, attempt, runner):
         receipt=read(control/'verified-archive.json');verify_flat(archive,inputs,fp,receipt)
     else:
         if mode==PROOF_OPERATION:
-            from proof_baseline import restore
-            restore(root,control,lease['worker'])
+            from proof_baseline import verify_prepared
+            verify_prepared(lease['worker']['expanded_base_root'])
         verify_manifest(root,inputs,fp)
     input_paths={row['path']for row in inputs['files']}
     if mode==PROOF_OPERATION:
