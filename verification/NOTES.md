@@ -12,14 +12,11 @@ Comparator's output will be added here when the run finishes.
 | Joined archive | `cat lean.tar.gz.part{01..14} > lean.tar.gz`: 239,275,554 bytes, sha256 `9631b4f020199e580ba86178cb56c6e9b09f690c2369a80dc4334aa93f49c7fc` |
 
 The first commit of this repository, `40e56bab`, is the archive's `lean/` directory exactly as
-published. Later commits add the Comparator challenge, config and export targets, the README,
-this folder, the CI workflow and, since
+published. Later commits add `src/Challenge.lean`, `comparator.json`, `export-targets.txt`, the
+README, this folder, the CI workflow and, since
 [#7](https://github.com/leanprover-community/riemann-hypothesis/pull/7), the build cache in
-`scripts/`. Until [#88](https://github.com/leanprover-community/riemann-hypothesis/pull/88) the
-three Comparator files were `src/Challenge.lean`, `comparator.json` and `export-targets.txt`.
-That pull request moved them unchanged to `comparator/Challenge.lean`, `comparator/main.json`
-and `comparator/main-export-targets.txt`. The second Comparator setup, in the same folder, is
-described [below](#formal-conjectures).
+`scripts/`. A second Comparator setup, in `comparator/`, is described
+[below](#formal-conjectures).
 
 Merged pull requests have since changed the submission's own files under `src/`, mainly by
 deleting files the proof does not use and by shortening proofs.
@@ -34,11 +31,8 @@ describe the original 175,187 files, not the current tree.
 `lakefile.toml` is the original with two additions:
 
 - three lines at the top, which set `platformIndependent = true` for the build cache;
-- a marked block at the end, which registers the `cache` executable and the cache server.
-
-Until [#88](https://github.com/leanprover-community/riemann-hypothesis/pull/88) the block also
-registered a `Challenge` library. The challenge is now compiled directly, as step 1 of the
-README shows, so `lakefile.toml` describes the submission and the cache and nothing else.
+- a marked block at the end, which registers the `Challenge` library, the `cache` executable and
+  the cache server.
 
 CI checks that the original file sits unchanged between the two. Neither addition makes Lake
 treat an existing build as out of date; that was tested on a small Lean `v4.33.1` project, not
@@ -125,9 +119,9 @@ in google-deepmind/formal-conjectures, at commit `d8d031d4` (2026-11-19). It fol
 [issue #34](https://github.com/leanprover-community/riemann-hypothesis/issues/34), which proved
 the equivalence used here against that commit.
 
-`comparator/` holds the Comparator setups. Each is a config and a list of export targets, both
-named after it, with its Lean files: `main` with `Challenge.lean`, and `formal-conjectures`
-with a challenge and three files for the solution side.
+`comparator/` holds this setup: a challenge, a config, a list of export targets, and three
+files for the solution side. The first setup's files stay where `lake comparator` looks for
+them: `comparator.json` at the root, and `Challenge` as a library in `src/`.
 
 **The statements.**
 
@@ -243,20 +237,44 @@ Mathlib, and none of the submission's proofs.
 proves the two theorems, under formal-conjectures' names, by applying the bridge to
 `LFunction_eq_zero_re_of_isPrimitive` and by `riemannHypothesis`, both from `Main.lean`.
 
-**No Lake library.** Nothing in `comparator/` is in a library of `lakefile.toml` or under
-`src/`. The lakefile describes the submission and the cache, and Comparator needs neither to
-know about the other. The README compiles the files with `lake env lean`, into
-`.lake/comparator/`. So the `[leanOptions]` of the lakefile do not apply to them. For
-`Challenge.lean` that changed nothing: on the earlier pins its export, compiled this way, had
-the sha256 it had as a library, `bd484ac9…`. That was checked on our machine and on GitHub's
-runners when the file moved.
+**No Lake library.** The files in `comparator/` are in no library of `lakefile.toml` and not
+under `src/`. The build cache is selected by the Git tree of `src/` and the bytes of
+`lakefile.toml` ([CACHE.md](CACHE.md)), so adding them there would leave `lake exe cache get`
+without a match until CI had rebuilt, and the CI build accepts no library outside `src/`. So
+this setup cannot use plain `lake comparator`, which has Lake build both modules. It compiles
+the files with `lake env lean`, into `.lake/comparator/`, and gives Comparator exports. The
+`[leanOptions]` of the lakefile do not apply to files compiled this way.
 
-**Cost.** The export of `FormalConjecturesSolution` contains the whole proof, as the export of
-`Main` does, plus the bridge. Making it and judging it cost what steps 3 and 4 of the README
-cost.
+**Checking it.** These steps go with the second route in the README, the one that exports the
+modules by hand, and use the same environment variables.
 
-**Rehearsal.** The real run needs the built submission. Without it, steps 1b, 3b and 4b of the
-README were run on Lean and Mathlib `v4.36.0` with a placeholder `Main.lean`, which states
+```bash
+# in the clone where the submission has not been compiled
+mkdir -p .lake/comparator
+lake env lean --root=comparator \
+  -o .lake/comparator/FormalConjecturesChallenge.olean comparator/FormalConjecturesChallenge.lean
+LEAN_PATH="$PWD/.lake/comparator" lake env leanexport FormalConjecturesChallenge -- \
+  $(cat comparator/formal-conjectures-export-targets.txt) > fc-challenge.export
+
+# wherever you build the submission, after `lake build Main`
+mkdir -p .lake/comparator
+for m in FormalConjecturesStatement FormalConjecturesBridge FormalConjecturesSolution; do
+  LEAN_PATH="$PWD/.lake/comparator" lake env lean --root=comparator \
+    -o ".lake/comparator/$m.olean" "comparator/$m.lean"
+done
+LEAN_PATH="$PWD/.lake/comparator" lake env leanexport FormalConjecturesSolution -- \
+  $(cat comparator/formal-conjectures-export-targets.txt) > fc-solution.export
+
+# from an empty directory, with the same Lean release and the config from the first clone
+lake comparator --config formal-conjectures.json \
+  --challenge-from-export fc-challenge.export --solution-from-export fc-solution.export
+```
+
+The export of `FormalConjecturesSolution` contains the whole proof, as the export of `Main`
+does, plus the bridge. Making it and judging it cost what exporting and judging `Main` cost.
+
+**Rehearsal.** The real run needs the built submission. Without it, the steps above were run
+on Lean and Mathlib `v4.36.0` with a placeholder `Main.lean`, which states
 `riemannHypothesis` and `LFunction_eq_zero_re_of_isPrimitive` and proves them by `sorry`. This
 was on macOS, which has no bubblewrap, so with `--inadvisably-no-sandbox`.
 
@@ -268,8 +286,9 @@ was on macOS, which has no bubblewrap, so with `--inadvisably-no-sandbox`.
 So the solution's statement and its three constants match the challenge's, and the kernels
 accept the bridge. The bridge and the solution needed no change for `v4.36.0`. `#print axioms`
 on the bridge's theorems gives `propext`, `Classical.choice` and `Quot.sound`. The challenge
-export is 356,115,533 bytes, with the sha256 in the README; the placeholder's solution export is
-426,481,210 bytes.
+export is 356,115,533 bytes, with sha256
+`0977ecc3ea2a1abd7b9b3356a4643574dd65c3b4c8a98ca25b18f5629efe0218`, which CI checks; the
+placeholder's solution export is 426,481,210 bytes.
 
 The `formal-conjectures` job in CI repeats the rehearsal. It runs when something it reads
 changes: `comparator/`, `src/Statements.lean`, the two pins in `lake-manifest.json` and
@@ -284,21 +303,19 @@ submission under a name the files here use. A text search of the 164,464 `.lean`
 `f1f6d654`, before #66, found no `GRH` or `RiemannHypothesis` namespace and none of the other
 names.
 
-**Frozen files.** Six files in `comparator/` say what the proof is judged against: the two
-challenges, the two configs and the two lists of export targets. A pull request may not change
-them. `challenge-files.yml` compares each one where the pull request branched off and at
+**Frozen files.** Six files say what the proof is judged against: `src/Challenge.lean`,
+`comparator.json` and `export-targets.txt` for the first setup, and
+`FormalConjecturesChallenge.lean`, `formal-conjectures.json` and
+`formal-conjectures-export-targets.txt` in `comparator/` for this one. A pull request may not
+change them. `challenge-files.yml` compares each one where the pull request branched off and at
 its head, and fails if they differ. It runs the base branch's copy of the workflow and nothing
 from the pull request, so a pull request cannot switch it off. For that reason CI no longer
-builds `Challenge.lean`: with the file and the pins unchanged, its export cannot change.
-On Lean and Mathlib `v4.36.0` that export has sha256
+builds `Challenge` on every push: with the file and the pins unchanged, what it states cannot
+change.
+On Lean and Mathlib `v4.36.0`, `challenge.export` made the way the README makes it has sha256
 `ccaa35047adcb2b493ad0ca36abfdd02633b56f5afad009d027b4570ee0f2194`, measured on our machine.
 
-The rehearsal does not compile `FormalConjecturesSolution.lean` against the real `Main.lean`.
-That needs the two theorems named above, which `Main.lean` has, and no declaration in the
-submission under a name the three files use. A text search of the 164,464 `.lean` files at
-commit `f1f6d654` finds no `GRH` or `RiemannHypothesis` namespace and none of the other names.
-
-**On a real build, on the earlier pins.** Before #66, ishaan2006 ran these steps against a
+**On a real build, on the earlier pins.** Before #66, ishaan2006 ran the same steps against a
 build of the published archive on Lean `v4.33.1`, and reported the results on the pull request
 ([first](https://github.com/leanprover-community/riemann-hypothesis/pull/88#issuecomment-7078205608),
 [second](https://github.com/leanprover-community/riemann-hypothesis/pull/88#issuecomment-7079766889),
@@ -311,9 +328,10 @@ has repeated this on `v4.36.0`.
 
 - All three files compile against the real `Main.lean`, with warnings as errors. `#print axioms`
   gives `propext`, `Classical.choice` and `Quot.sound` for both theorems.
-- Step 1b on Linux (Debian 13, x86_64) gives a challenge export of 350,866,107 bytes with the
-  sha256 in the README, as on macOS and in CI.
-- Step 3b gives a solution export of 61,570,614,651 bytes, sha256
+- On Linux (Debian 13, x86_64) the export of formal-conjectures' file is 350,866,107 bytes with
+  sha256 `75aa4a26e43ba9ea2998ba28ebdec4d72c43b43944e6c333963c4cfeda08c2c1`, as on macOS and as
+  in CI at the time.
+- The solution export is 61,570,614,651 bytes, sha256
   `17719b54c91e0f5c3f89a1741fd074b5b86f15f26ac57b443ef965f4ccd72f70`, in 5,712 s.
 - `con-leche --compare` on the two exports exits 0, in 182 s on 94 cores:
 
@@ -464,7 +482,7 @@ on one thread.
     container has exited, from a fresh clone and a fresh download of Mathlib's official cache.
     A build that altered the compiled Mathlib in its own folder cannot change what the
     challenge means. The files it is made from are frozen in CI
-    ([formal-conjectures](#formal-conjectures)), and its sha256 is in the README.
+    ([formal-conjectures](#formal-conjectures)).
   - The exporter and the other tools in the work directory are rebuilt after the build.
   - Every compiled dependency file in the build folder is compared with a clean official copy.
     A first comparison during the build found all 121,742 files identical.

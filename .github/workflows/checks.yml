@@ -66,7 +66,7 @@ jobs:
           head -c "$n" "$T/lakefile-without-cache.toml" | cmp - "$T/lean/lakefile.toml"
           tail -c +"$((n + 1))" "$T/lakefile-without-cache.toml"
 
-  # The second Comparator setup, comparator/formal-conjectures.json. See the README and the notes.
+  # The second Comparator setup, comparator/formal-conjectures.json. See the notes.
   formal-conjectures:
     name: formal-conjectures challenge matches upstream's text, and a rehearsal of the judge
     runs-on: ubuntu-latest
@@ -80,7 +80,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: |
-            /README.md
             /lakefile.toml
             /lake-manifest.json
             /lean-toolchain
@@ -92,7 +91,6 @@ jobs:
       # formal-conjectures'. This ties the copy to the text it was taken from.
       - name: The challenge is formal-conjectures' text at the pinned commit
         run: |
-          grep -q "$FC_REV" README.md
           grep -q "$FC_REV" comparator/FormalConjecturesChallenge.lean
           python3 - <<'PY'
           import os, re, urllib.request
@@ -145,7 +143,7 @@ jobs:
       - name: Fetch Mathlib's official build cache
         run: lake exe mathlib/cache get
 
-      # Step 1b of the README.
+      # The first step under "Checking it" in the notes.
       - name: Compile and export the challenge
         run: |
           mkdir -p .lake/comparator
@@ -160,11 +158,11 @@ jobs:
             echo "- sha256: \`$(cut -d' ' -f1 fc-challenge.export.sha256)\`"
             echo "- size: $(wc -c < fc-challenge.export) bytes, $(wc -l < fc-challenge.export) lines"
           } >> "$GITHUB_STEP_SUMMARY"
-          # The README quotes this checksum; fail if the export ever changes.
+          # The notes quote this checksum; fail if the export ever changes.
           echo "0977ecc3ea2a1abd7b9b3356a4643574dd65c3b4c8a98ca25b18f5629efe0218  fc-challenge.export" | sha256sum -c
 
-      # Steps 3b and 4b, rehearsed: `Main.lean` is replaced by a placeholder that assumes the
-      # two theorems the solution uses.
+      # The other two steps, rehearsed: `Main.lean` is replaced by a placeholder that assumes
+      # the two theorems the solution uses.
       - name: Compile the solution against a placeholder Main, and export
         run: |
           out=.lake/comparator

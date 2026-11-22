@@ -58,7 +58,11 @@ globs = ["Supplements.+"]
 [[lean_lib]]
 name = "Main"
 roots = ["Statements", "Main"]
-# --- Everything below this line was added for the build cache; it is not part of the submission ---
+# --- Everything below this line was added for Comparator; it is not part of the submission ---
+
+[[lean_lib]]
+name = "Challenge"
+roots = ["Challenge"]
 
 # Project cache entrypoint. The original submission above is unchanged.
 [[lean_exe]]
