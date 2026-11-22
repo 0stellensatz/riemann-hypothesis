@@ -2,7 +2,7 @@
 
 [![checks](https://github.com/leanprover-community/riemann-hypothesis/actions/workflows/checks.yml/badge.svg)](https://github.com/leanprover-community/riemann-hypothesis/actions/workflows/checks.yml)
 
-Build cache for a Lean formalization the proof of the Riemann Hypothesis, and of GRH for Dirichlet L-functions. The first commit is as posted by Levent Alpöge, retrieved on at 2026-11-20 at <https://alpo.ge/remark.pdf>.
+Build cache for a Lean formalization the proof of the Riemann Hypothesis, and of GRH for Dirichlet L-functions. The first commit is as posted by Levent Alpöge, retrieved on 2026-11-20 at <https://alpo.ge/remark.pdf>.
 
 The first commit, `40e56bab`, is the Lean source exactly as it was published. It has been
 changed since. Pull requests have deleted files the proof doesn't use, shortened proofs, and
