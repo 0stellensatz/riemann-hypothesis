@@ -6,7 +6,7 @@ import subprocess
 import rpc
 
 
-def restore(root, control, worker):
+def restore(root, control, worker, incoming=None):
     policy = rpc.proof_policy()
     expected = policy['baseline']
     cache = Path(worker['baseline_cache_root'])
@@ -24,7 +24,7 @@ def restore(root, control, worker):
     affected = rpc.proof_worklist(Path(control) / 'proof-worklist.txt')
     inputs = rpc.read(Path(control) / 'input-manifest.json')
     # An incoming current-snapshot artifact always takes precedence over a base.
-    incoming = set(inputs['modules'])
+    incoming = set(inputs['modules']) if incoming is None else incoming
     jobs, seen, unchanged = [], set(), 0
     for name, dep_hash, archive, digest in rows:
         rpc.module_name(name)
@@ -55,3 +55,62 @@ def restore(root, control, worker):
                        input=json.dumps(jobs), text=True, check=True)
     return {'baseline_modules': unchanged, 'restored_modules': len(jobs),
             'affected_modules_restored': 0}
+
+
+def seal_fields():
+    policy = rpc.proof_policy()
+    return {'schema': 1, 'kind': 'expanded-unchanged-native-baseline',
+            'baseline': policy['baseline'], 'worklist_sha256': policy['worklist_sha256']}
+
+
+def prepared(path):
+    path = Path(path)
+    seal = path / 'complete.json'
+    return (path.is_dir() and not path.is_symlink() and seal.is_file() and
+            not seal.is_symlink() and rpc.read(seal) == seal_fields() and
+            (path / '.lake/build/lib/lean').is_dir() and (path / '.lake/build/ir').is_dir())
+
+
+def ensure(worker, control, tools, system_mounts):
+    """Cold expansion runs once in a separate no-network sandbox, before proofs."""
+    import fcntl
+    import os
+    import sys
+    import tempfile
+    destination = Path(worker['expanded_base_root']).resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with (destination.parent / (destination.name + '.lock')).open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if prepared(destination):
+            return destination
+        rpc.require(not destination.exists(), 'unsealed base directory requires operator recovery')
+        partial = Path(tempfile.mkdtemp(prefix=destination.name + '.building-', dir=destination.parent))
+        cache = Path(worker['baseline_cache_root']).resolve()
+        toolchain = Path(worker['toolchain_root']).resolve()
+        command = ['bwrap', '--tmpfs', '/', '--dev', '/dev', '--proc', '/proc',
+                   '--unshare-net', '--unshare-pid', '--die-with-parent', '--new-session', '--clearenv',
+                   '--dir', '/tmp', *system_mounts]
+        for source in (cache, toolchain, Path(control).resolve(), Path(tools).resolve()):
+            command += ['--ro-bind', str(source), str(source)]
+        command += ['--bind', str(partial), str(partial), '--setenv', 'PATH',
+                    str(toolchain / 'bin') + ':/usr/bin:/bin:/run/current-system/sw/bin',
+                    sys.executable, str(Path(tools) / 'proof_baseline.py'), str(partial), str(control)]
+        subprocess.run(command, check=True)
+        rpc.require(prepared(partial), 'native baseline expansion did not seal successfully')
+        partial.rename(destination)
+    return destination
+
+
+def verify_prepared(path):
+    rpc.require(prepared(path) and rpc.readonly_mount(path), 'expanded baseline is not sealed/read-only')
+
+
+if __name__ == '__main__':
+    import sys
+    root, control = map(Path, sys.argv[1:])
+    lease = rpc.read(control / 'lease.json')
+    # A sealed tree is independent of any one lease's dependency deltas.
+    manifest = rpc.read(control / 'input-manifest.json')
+    # restore(..., incoming=set()) requests the complete unchanged subset.
+    restore(root, control, lease['worker'], incoming=set())
+    rpc.atomic(root / 'complete.json', seal_fields())

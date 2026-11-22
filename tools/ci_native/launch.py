@@ -5,6 +5,15 @@ from pathlib import Path
 import rpc
 from producer import dependency_paths
 
+def system_mounts():
+    argv=[]
+    for name in ['/nix/store','/usr','/bin','/sbin','/lib','/lib64']:
+        path=Path(name)
+        if path.exists():argv+=['--ro-bind',str(path.resolve()),name]
+    sw=Path('/run/current-system/sw')
+    if sw.exists():argv+=['--ro-bind',str(sw.resolve()),str(sw)]
+    return argv
+
 def dependency_mounts(root,deps,output,packages,overlay):
     """Only private upper/copy paths are writable; original caches stay read-only."""
     argv=[]
@@ -31,7 +40,7 @@ def dependency_mounts(root,deps,output,packages,overlay):
                 argv+=['--ro-bind',str(metadata),str(destination/'.git')]
     return argv
 
-def command(root,control,output,producer,run_id,attempt,runner):
+def command(root,control,output,producer,run_id,attempt,runner,seal_base=True):
     root=Path(root).resolve();control=Path(control).resolve();output=Path(output).resolve();producer=Path(producer).resolve()
     lease=rpc.read(control/'lease.json');request=rpc.read(control/'request-0.json')
     rpc.check_lease(lease,request,run_id,attempt,runner);rpc.resource_limits(lease['worker'])
@@ -57,19 +66,32 @@ def command(root,control,output,producer,run_id,attempt,runner):
     tools=Path(__file__).parent.resolve()
     rpc.require(producer.parent==tools,'backend wrapper must belong to the trusted tools bundle')
     rpc.require(shutil.which('bwrap') is not None,'bubblewrap required; no unsandboxed fallback')
+    expanded=None
+    overlay='--overlay-src' in subprocess.check_output(['bwrap','--help'],text=True) if proof else False
+    if proof and seal_base:
+        from proof_baseline import ensure
+        expanded=ensure(worker,control,tools,system_mounts())
+        if not overlay:
+            # Copy/reflink private inodes on older Bubblewrap. Incoming current
+            # dependencies override base copies, never the other way around.
+            private=output/'private-base-build';private.mkdir(exist_ok=True)
+            subprocess.run(['cp','-a','--reflink=auto','--no-preserve=ownership',
+                            str(expanded/'.lake/build')+'/.',str(private)],check=True)
+            for row in inputs['files']:
+                relative=Path(row['path']).relative_to('.lake/build')
+                dest=private/relative;dest.parent.mkdir(parents=True,exist_ok=True)
+                shutil.copyfile(cache/relative,dest)
+            cache=private
     # Start with an empty filesystem, not a read-only view of host runner secrets.
     argv=['bwrap','--tmpfs','/','--dev','/dev','--proc','/proc','--unshare-net','--unshare-pid',
           '--die-with-parent','--new-session','--clearenv','--dir','/tmp','--dir','/tmp/native-home']
-    for name in ['/nix/store','/usr','/bin','/sbin','/lib','/lib64']:
-        path=Path(name)
-        if path.exists():argv+=['--ro-bind',str(path.resolve()),name]
+    argv+=system_mounts()
     for name in ['/sys/fs/cgroup']:
         argv+=['--ro-bind',name,name]
-    sw=Path('/run/current-system/sw')
-    if sw.exists():argv+=['--ro-bind',str(sw.resolve()),str(sw)]
     mounts={root,tools,control,deps,tc,*libs}
     if archive:mounts.add(archive)
     if proof:mounts.add(Path(worker['baseline_cache_root']).resolve())
+    if expanded:mounts.add(expanded)
     for path in sorted(mounts,key=lambda p:(len(p.parts),str(p))):
         argv+=['--ro-bind',str(path),str(path)]
     if proof:
@@ -78,9 +100,12 @@ def command(root,control,output,producer,run_id,attempt,runner):
             (private_lake/directory).mkdir(parents=True,exist_ok=True)
         argv+=['--bind',str(private_lake),str(root/'.lake')]
         argv+=['--ro-bind',str(deps),str(root/'.lake/packages')]
-        overlay='--overlay-src' in subprocess.check_output(['bwrap','--help'],text=True)
         argv+=dependency_mounts(root,deps,output,rpc.read(root/'lake-manifest.json')['packages'],overlay)
-    argv+=['--bind',str(cache),str(root/'.lake/build'),'--bind',str(returned),str(returned)]
+    if proof and overlay and expanded:
+        work=output/'base-overlay-work';work.mkdir(exist_ok=True)
+        argv+=['--overlay-src',str(expanded/'.lake/build'),'--overlay',str(cache),str(work),str(root/'.lake/build')]
+    else:argv+=['--bind',str(cache),str(root/'.lake/build')]
+    argv+=['--bind',str(returned),str(returned)]
     env={'PATH':str(tc/'bin')+':/usr/bin:/bin:/run/current-system/sw/bin','HOME':'/tmp/native-home','LANG':'C.UTF-8',
          'GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':'/dev/null'}
     for key,value in env.items():argv+=['--setenv',key,value]

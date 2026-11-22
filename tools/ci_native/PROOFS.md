@@ -25,3 +25,9 @@ Run unit tests with `python3 -m unittest discover -s tools/ci_native -p 'test_*.
 `pilot_proofs.py` exercises real stock proof compilation and the missing-import
 guard. `pilot_mathlib_sandbox.py` checks the namespace and writable package
 metadata with a real Mathlib import.
+
+The unchanged baseline expands once into a sealed, snapshot-specific state directory.
+A cold expansion runs in its own network-free namespace and publishes its seal only
+on success. Later leases mount that tree read-only beneath a private build overlay;
+older Bubblewrap versions use private copy/reflink inodes. Failed partial expansions
+remain available for inspection and are never mistaken for a completed base.

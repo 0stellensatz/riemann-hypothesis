@@ -19,6 +19,7 @@ def main():
     for name in ('dependency-root', 'toolchain', 'worklist', 'project-config'):
         parser.add_argument('--' + name, required=True, type=Path)
     parser.add_argument('--receipt', type=Path)
+    parser.add_argument('--sealed-base', action='store_true')
     args = parser.parse_args()
     dependencies, toolchain = args.dependency_root.resolve(), args.toolchain.resolve()
     allowed = sorted(rpc.proof_worklist(args.worklist))
@@ -56,8 +57,14 @@ def main():
         baseline.mkdir()
         lease['worker'].update(dependency_root=str(dependencies), toolchain_root=str(toolchain),
                                baseline_cache_root=str(baseline))
+        if args.sealed_base:
+            import proof_baseline
+            expanded=base/'expanded'
+            for part in ('lib/lean','ir'):(expanded/'.lake/build'/part).mkdir(parents=True)
+            rpc.atomic(expanded/'complete.json',proof_baseline.seal_fields())
+            lease['worker']['expanded_base_root']=str(expanded)
         rpc.atomic(control / 'lease.json', lease)
-        argv = launch.command(root, control, output, trusted, '123', 1, 'pilot')
+        argv = launch.command(root, control, output, trusted, '123', 1, 'pilot',seal_base=args.sealed_base)
         index = argv.index('--chdir')
         # Reuse the exact production isolation and dependency mounts. Only this
         # test's fixed tiny backend replaces the file-RPC/real-source checks.
@@ -76,7 +83,8 @@ def main():
         native_parts=[]
         for suffix in rpc.PROOF_PARTS:
             part='ir' if suffix=='.c' else 'lib/lean'
-            path=output/'seed/.lake/build'/part/Path(*name.split('.')).with_suffix(suffix)
+            upper=output/'seed/.lake/build' if not args.sealed_base or '--overlay-src' in argv else output/'private-base-build'
+            path=upper/part/Path(*name.split('.')).with_suffix(suffix)
             assert path.is_file(), 'successful Mathlib proof lacks '+suffix
             native_parts.append({'suffix':suffix,'bytes':path.stat().st_size,'sha256':rpc.digest(path)})
         for path, sha in before.items():
