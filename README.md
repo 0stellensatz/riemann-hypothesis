@@ -8,8 +8,11 @@ claims a proof of the Riemann Hypothesis, and of GRH for Dirichlet L-functions, 
 
 The first commit, `40e56bab`, is the submitted Lean source exactly as published. Since then,
 cleanup pull requests have removed 10,724 of its 175,187 files and edited 18; the
-[notes](verification/NOTES.md#source) list them. Check out `40e56bab` for the original. This
-repository also adds Comparator files and cache infrastructure:
+[notes](verification/NOTES.md#source) list them. For the original, check out `40e56bab` or use
+[riemann-hypothesis-original](https://github.com/homeowmorphism/riemann-hypothesis-original),
+which keeps the published source frozen.
+
+This repository also adds Comparator files and cache infrastructure:
 
 | File | What it is |
 |---|---|
