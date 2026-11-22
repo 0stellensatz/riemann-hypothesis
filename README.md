@@ -105,5 +105,5 @@ limits of what a passing run shows.
 ## License
 
 The submission belongs to its author and was published without a license. It is mirrored here
-for verification only: unmodified at commit `40e56bab`, and with the changes listed in the
-[notes](verification/NOTES.md#source) since.
+for verification only: unmodified at commit `40e56bab`, and changed since then as the
+[notes](verification/NOTES.md#source) describe.
