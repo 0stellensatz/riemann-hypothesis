@@ -320,7 +320,7 @@ jobs:
           umask 077
           systemd-run --user --wait --collect --pipe --unit="rh-proof-${RUN_ID}-${ATTEMPT}-${ID}" \
             -p "CPUQuota=$((CPUS*100))%" -p "MemoryMax=${MEMORY}M" -p MemorySwapMax=0 \
-            -p TasksMax=512 -p LimitSTACK=infinity -p "RuntimeMaxSec=$((SECONDS_LIMIT+120))" \
+            -p TasksMax=16384 -p LimitSTACK=infinity -p "RuntimeMaxSec=$((SECONDS_LIMIT+120))" \
             python3 "$PWD/trusted/tools/ci_native/launch.py" --root "$PWD/candidate" \
             --control "$PROOF_CONTROL_ROOT/$ID" --output "$PROOF_OUTPUT_ROOT" \
             --producer "$PWD/trusted/tools/ci_native/proof_producer.py" \
