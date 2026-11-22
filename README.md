@@ -3,8 +3,21 @@
 [![checks](https://github.com/leanprover-community/riemann-hypothesis/actions/workflows/checks.yml/badge.svg)](https://github.com/leanprover-community/riemann-hypothesis/actions/workflows/checks.yml)
 
 
-A community-led effort to clean up and maintain a Lean formalization of the Riemann Hypothesis,
-and of GRH for Dirichlet L-functions. The `original` branch contains the first commit as retrieved on 2026-11-20 from <https://alpo.ge/remark.pdf>
+A community-led effort to clean up and maintain a Lean formalization of the 2026 proof of the Riemann Hypothesis and of GRH for Dirichlet L-functions.
+
+The purpose of this repo is to create an artifact that is:
+
+- **accessible**: we want to improve build performance and modularity to enable researchers to feasibly engage with the proof even without access to massive amounts of compute.
+- **readable**: we want to improve code quality while preserving the "logic" of the proof, aspirationally to Mathlib levels. This includes lemma organization, formatting and idiomatic style, eliminating linter warnings, slop-free documentation, and more.
+- **integrated with the community**: we would like to add bibliographic references to prior work where appropriate, and rely on existing formalization projects when possible.
+
+Please note: we are **not** looking for:
+
+- complete overhauls that follow a substantially different proof path
+- claims about your own machine's builds / comparator run
+- adding files which are not necessary for the Riemann Hypothesis proof
+
+This work is taking place on the `main` branch. The `original` branch preserves the first publicly-released version of the proof retrieved on 2026-11-20 from <https://alpo.ge/remark.pdf>.
 
 ## Theorem Statements
 
