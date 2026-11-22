@@ -232,7 +232,8 @@ def current_cgroup():
     require(row is not None and row.startswith('/')and '..'not in PurePosixPath(row).parts,'cgroup-v2 unit path required')
     return Path('/sys/fs/cgroup')/row.lstrip('/')
 
-def resource_limits(worker):
+def resource_limits(worker, mode=OPERATION):
+    mode=operation(mode)
     # Effective limits include the actual worker unit and all cgroup ancestors.
     current=current_cgroup();root=Path('/sys/fs/cgroup');memory=[];cpu=[];pids=[]
     while True:
@@ -249,7 +250,8 @@ def resource_limits(worker):
         require(current.is_relative_to(root),'cgroup escaped mount');current=current.parent
     require(memory and 0<min(memory)<=worker['memory_mib']*1024**2,'memory cgroup absent/too large')
     require(cpu and 0<min(cpu)<=worker['cpus'],'CPU cgroup absent/too large')
-    require(pids and 0<min(pids)<=512,'PID cgroup absent/too large; set TasksMax=512')
+    pid_limit=16384 if mode==PROOF_OPERATION else 512
+    require(pids and 0<min(pids)<=pid_limit,f'PID cgroup absent/too large; set TasksMax={pid_limit}')
 
 def readonly_mount(path):
     target=Path(path).resolve();matches=[]
@@ -293,7 +295,7 @@ def no_network():
 
 def worker(root, control, output, producer, run_id, attempt, runner):
     control=Path(control);out=Path(output);lease=read(control/'lease.json');request=read(control/'request-0.json')
-    names=check_lease(lease,request,run_id,attempt,runner);mode=lease['operation'];require(no_network(),'runtime execution requires network-none isolation');resource_limits(lease['worker'])
+    names=check_lease(lease,request,run_id,attempt,runner);mode=lease['operation'];require(no_network(),'runtime execution requires network-none isolation');resource_limits(lease['worker'],mode)
     require(digest(producer)==lease['producer_sha256'],'unreviewed runtime producer')
     verify_source(root,lease['snapshot'],mode);fp=lease['snapshot']['fingerprint'];inputs=read(control/'input-manifest.json');require(digest(control/'input-manifest.json')==lease['input_manifest_sha256'],'foreign input manifest')
     archive=lease['worker'].get('archive_root')

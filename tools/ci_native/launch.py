@@ -43,7 +43,7 @@ def dependency_mounts(root,deps,output,packages,overlay):
 def command(root,control,output,producer,run_id,attempt,runner,seal_base=True):
     root=Path(root).resolve();control=Path(control).resolve();output=Path(output).resolve();producer=Path(producer).resolve()
     lease=rpc.read(control/'lease.json');request=rpc.read(control/'request-0.json')
-    rpc.check_lease(lease,request,run_id,attempt,runner);rpc.resource_limits(lease['worker'])
+    rpc.check_lease(lease,request,run_id,attempt,runner);rpc.resource_limits(lease['worker'],lease['operation'])
     rpc.require(rpc.digest(producer)==lease['producer_sha256'],'unreviewed backend wrapper')
     rpc.require((root/'.lake/build').is_dir(),'use a private candidate checkout with an existing empty .lake/build')
     rpc.require(not (root/'.lake/build').is_symlink(),'cache mount must not be a symlink')
