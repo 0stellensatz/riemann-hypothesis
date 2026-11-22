@@ -6,16 +6,6 @@ A [Comparator](https://github.com/leanprover/comparator) setup and community bui
 claims a proof of the Riemann Hypothesis, and of GRH for Dirichlet L-functions, announced on
 2026-11-20 at <https://alpo.ge/remark.pdf>.
 
-The first commit, `40e56bab`, is the submitted Lean source exactly as published, for Lean
-`v4.33.1`. The source on `main` has changed since then in two ways:
-
-- **Cleanup.** Merged pull requests delete files the proof does not use and shorten proofs.
-- **Port.** [#66](https://github.com/leanprover-community/riemann-hypothesis/pull/66) moved the
-  project to Lean and Mathlib `v4.36.0`. It adapts proofs throughout the source, converts every
-  file but `Challenge.lean` to Lean's module system and deletes files `Main` does not reach; the
-  pull request has the figures. It also undid part of the earlier cleanup, which
-  [PR66-MERGED-WORK.md](verification/PR66-MERGED-WORK.md) lists.
-
 The port did not touch the statements: `src/Challenge.lean` is byte for byte the file from
 before it, and `src/Statements.lean` differs only in its module header.
 
