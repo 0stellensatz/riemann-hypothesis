@@ -1,0 +1,6 @@
+name = "runtimeproducer436"
+
+[[lean_exe]]
+name = "runtime-producer"
+root = "RuntimeProducer"
+supportInterpreter = true
