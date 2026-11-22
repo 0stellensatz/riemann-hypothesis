@@ -4,8 +4,7 @@
 
 Build cache for a Lean formalization the proof of the Riemann Hypothesis, and of GRH for Dirichlet L-functions. The first commit is as posted by Levent Alpöge, retrieved on 2026-11-20 at <https://alpo.ge/remark.pdf>.
 
-The first commit, `40e56bab`, is the Lean source exactly as it was published. It has been
-changed since. Pull requests have deleted files the proof doesn't use, shortened proofs, and
+It has been changed since. Pull requests have deleted files the proof doesn't use, shortened proofs, and
 ported it from Lean 4.33.1, which it was written for, to newer releases. The five theorems in
 `src/Main.lean` still have the names and types they were published with, and the definitions
 those types use, in `src/Statements.lean`, are unchanged. Their proofs are not the published
