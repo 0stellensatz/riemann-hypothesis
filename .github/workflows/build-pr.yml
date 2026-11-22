@@ -262,6 +262,9 @@ jobs:
     timeout-minutes: ${{ matrix.timeout_minutes }}
     permissions:
       contents: read
+    env:
+      PROOF_CONTROL_ROOT: ${{ github.workspace }}/proof-controls/${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.lease_id }}
+      PROOF_OUTPUT_ROOT: ${{ github.workspace }}/proof-returned/${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.lease_id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -284,7 +287,7 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: proof-controls-${{ github.run_id }}-${{ github.run_attempt }}
-          path: control
+          path: ${{ env.PROOF_CONTROL_ROOT }}
       - name: Fetch authenticated dependency deltas and prepare public stock caches
         env:
           ID: ${{ matrix.id }}
@@ -293,14 +296,14 @@ jobs:
         run: |
           umask 077
           export PATH="$HOME/.elan/bin:$PATH"
-          python3 trusted/tools/ci_native/fetch_proof_seed.py --seed-sha256 "$SEED_SHA" --output "control/$ID" --inputs-only
+          python3 trusted/tools/ci_native/fetch_proof_seed.py --seed-sha256 "$SEED_SHA" --output "$PROOF_CONTROL_ROOT/$ID" --inputs-only
           python3 trusted/tools/ci_native/prepare_host.py --trusted trusted --candidate candidate \
-            --control "control/$ID" --state "${RH_CI_STATE_DIR:-$HOME/.local/share/riemann-build-state}" \
+            --control "$PROOF_CONTROL_ROOT/$ID" --state "${RH_CI_STATE_DIR:-$HOME/.local/share/riemann-build-state}" \
             --runner "$ACTUAL_RUNNER"
           python3 - <<'PY'
           import json, os, subprocess
           from pathlib import Path
-          lease = json.loads((Path('control') / os.environ['ID'] / 'lease.json').read_text())
+          lease = json.loads((Path(os.environ['PROOF_CONTROL_ROOT']) / os.environ['ID'] / 'lease.json').read_text())
           subprocess.run(['python3', 'trusted/tools/ci_native/build_backend.py', '--operation', 'native-proof',
                           '--toolchain', lease['worker']['toolchain_root']], check=True)
           PY
@@ -315,19 +318,18 @@ jobs:
           SECONDS_LIMIT: ${{ matrix.timeout_seconds }}
         run: |
           umask 077
-          mkdir -p proof-returned
           systemd-run --user --wait --collect --pipe --unit="rh-proof-${RUN_ID}-${ATTEMPT}-${ID}" \
             -p "CPUQuota=$((CPUS*100))%" -p "MemoryMax=${MEMORY}M" -p MemorySwapMax=0 \
             -p TasksMax=512 -p LimitSTACK=infinity -p "RuntimeMaxSec=$((SECONDS_LIMIT+120))" \
             python3 "$PWD/trusted/tools/ci_native/launch.py" --root "$PWD/candidate" \
-            --control "$PWD/control/$ID" --output "$PWD/proof-returned" \
+            --control "$PROOF_CONTROL_ROOT/$ID" --output "$PROOF_OUTPUT_ROOT" \
             --producer "$PWD/trusted/tools/ci_native/proof_producer.py" \
             --run-id "$RUN_ID" --attempt "$ATTEMPT" --runner "$ACTUAL_RUNNER"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: native-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.lease_id }}
-          path: proof-returned/returned
+          path: ${{ env.PROOF_OUTPUT_ROOT }}/returned
           if-no-files-found: warn
           compression-level: 0
           retention-days: 3

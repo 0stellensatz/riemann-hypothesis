@@ -47,6 +47,8 @@ def command(root,control,output,producer,run_id,attempt,runner,seal_base=True):
     rpc.require(rpc.digest(producer)==lease['producer_sha256'],'unreviewed backend wrapper')
     rpc.require((root/'.lake/build').is_dir(),'use a private candidate checkout with an existing empty .lake/build')
     rpc.require(not (root/'.lake/build').is_symlink(),'cache mount must not be a symlink')
+    rpc.require(not output.exists() or (output.is_dir() and not any(output.iterdir())),
+                'lease output must be fresh; preserve prior lease results at their original path')
     output.mkdir(parents=True,exist_ok=True);cache=output/'cache';cache.mkdir(exist_ok=True);returned=output/'returned';returned.mkdir(exist_ok=True)
     worker=lease['worker'];proof=lease['operation']==rpc.PROOF_OPERATION
     archive=Path(worker['archive_root']).resolve() if not proof else None
