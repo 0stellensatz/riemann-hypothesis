@@ -51,12 +51,11 @@ jobs:
                 challenge+="  $path"$'\n' ;;
             esac
             case "$path" in
-              .github/* | scripts/* | tools/* | .gitattributes | \
-              verification/CI-RUNNERS.md | verification/PORTABLE-CACHE.md)
+              .github/* | scripts/* | tools/* | .gitattributes)
                 ci+="  $path"$'\n' ;;
             esac
             case "$path" in
-              README.md | verification/CACHE.md)
+              README.md | verification/*.md)
                 docs+="  $path"$'\n' ;;
             esac
           done < changed
