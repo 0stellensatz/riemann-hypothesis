@@ -2,15 +2,16 @@
 
 [![checks](https://github.com/leanprover-community/riemann-hypothesis/actions/workflows/checks.yml/badge.svg)](https://github.com/leanprover-community/riemann-hypothesis/actions/workflows/checks.yml)
 
-Build cache for a Lean formalization the proof of the Riemann Hypothesis, and of GRH for Dirichlet L-functions. The first commit is as posted by Levent Alpöge, retrieved on 2026-11-20 at <https://alpo.ge/remark.pdf>.
+A Lean formalization of the Riemann Hypothesis, and of GRH for Dirichlet L-functions.
 
-It has been changed since. Pull requests have deleted files the proof doesn't use, shortened proofs, and
-ported it from Lean 4.33.1, which it was written for, to newer releases. The five theorems in
-`src/Main.lean` still have the names and types they were published with, and the definitions
-those types use, in `src/Statements.lean`, are unchanged. Their proofs are not the published
-ones. `git diff --stat 40e56bab HEAD -- src` lists everything that has changed. If you want the
-untouched original, check out `40e56bab` or use
-[riemann-hypothesis-original](https://github.com/homeowmorphism/riemann-hypothesis-original).
+Levent Alpöge announced it on 2026-11-20 ([remark.pdf](https://alpo.ge/remark.pdf)), and the
+first commit, `40e56bab`, is the source as posted. Since then pull requests have deleted files
+the proof doesn't use, shortened proofs, and ported it from Lean 4.33.1 to newer releases. The
+five theorems in `src/Main.lean`, and the definitions in `src/Statements.lean` that they are
+stated with, read exactly as published. `git diff --stat 40e56bab HEAD -- src` lists what has
+changed, and
+[riemann-hypothesis-original](https://github.com/homeowmorphism/riemann-hypothesis-original)
+keeps the original frozen.
 
 **Verification scope:** The cache provides precompiled files for browsing and reuse. The
 `checks` workflow compiles the challenge statements; a separate workflow builds pull requests.
@@ -54,55 +55,25 @@ nothing left to compile.
 
 Don't treat the cache as a check of the proof. It contains files built from unreviewed pull
 requests on volunteers' machines, and all the download verifies is that you received what was
-uploaded. If you need to trust the result, build it yourself as described below.
+uploaded. To check the proof, run Comparator as described below.
 [CACHE.md](verification/CACHE.md) explains how the cache is made.
 
 ## Checking the proof
 
-To check the proof yourself, without the cache, take a fresh clone on a Linux machine with
-[bubblewrap](https://github.com/containers/bubblewrap) installed and run:
-
 ```bash
-MATHLIB_CACHE_GET_URL=https://cache.mathlib.org/mathlib4 lake exe mathlib/cache get
+lake exe cache get
 lake comparator
 ```
 
-The first command fetches Mathlib's compiled files and nothing of ours. Don't use
-`lake exe cache get` here, because that also downloads our prebuilt copy of the submission. The
-second reads `comparator.json`, builds `Challenge` and `Main` in a sandbox with no network, and
-makes the checks described under [What is claimed](#what-is-claimed).
+In this repository `lake exe cache get` downloads our compiled copy of the proof along with
+Mathlib's cache. `lake comparator` then checks the proof against `Challenge.lean`, as described
+under [What is claimed](#what-is-claimed). It needs Linux with
+[bubblewrap](https://github.com/containers/bubblewrap), a lot of memory and several hours. To
+have the proof compiled from source as well, start with `lake exe mathlib/cache get`, which
+fetches only Mathlib.
 
-The build is the expensive part, and compiling the submission runs its code. If you would
-rather build in a VM or a sandbox of your own, fetch Mathlib's cache as above, export the two
-modules yourself and hand them to Comparator:
-
-```bash
-export LEAN_ABORT_ON_PANIC=1        # as Comparator does
-export LAKE_ARTIFACT_CACHE=false    # in case cache-env.sh was sourced
-
-# in a clone where the submission has not been compiled
-lake build Challenge
-lake env leanexport Challenge -- $(cat export-targets.txt) > challenge.export
-
-# wherever you build the submission
-lake build Main
-lake env leanexport Main -- $(cat export-targets.txt) > solution.export
-
-# from an empty directory, with the same Lean release and comparator.json from the first clone
-lake comparator --config comparator.json \
-  --challenge-from-export challenge.export --solution-from-export solution.export
-```
-
-The published source was written for Lean 4.33.1, which has neither `lake comparator` nor
-`leanexport`, so checking `40e56bab` itself takes two toolchains.
-[An older version of this README](https://github.com/leanprover-community/riemann-hypothesis/blob/7cce738ba719a32964ca3822d0994f4c6952c7ae/README.md#checking-it)
-has those steps.
-
-We don't have a complete run on the current source yet, by either route. On the published
-source the build took hours on a large machine and about 100 GB of disk, and judging needs a
-lot of memory. [NOTES.md](verification/NOTES.md) says where the source came from, how the tools
-and sandboxes are set up and what a passing run does and doesn't show, but it still describes
-the Lean 4.33.1 setup.
+We don't have a complete run on the current source yet. [NOTES.md](verification/NOTES.md) has
+the long version, written for the published source on Lean 4.33.1.
 
 ## CI
 
