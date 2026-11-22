@@ -55,47 +55,50 @@ uploaded. If you need to trust the result, build it yourself as described below.
 
 ## Checking the proof
 
-```bash
-export LEAN_ABORT_ON_PANIC=1        # stop on an internal error, as Comparator does
-export LAKE_ARTIFACT_CACHE=false    # really rebuild, even if cache-env.sh was sourced earlier
-export MATHLIB_CACHE_GET_URL=https://cache.mathlib.org/mathlib4
+To check the proof yourself, without the cache, take a fresh clone on a Linux machine with
+[bubblewrap](https://github.com/containers/bubblewrap) installed and run:
 
-# 1. Export the challenge, in a clean clone at $CLEAN.
-cd "$CLEAN"
-lake exe mathlib/cache get
+```bash
+MATHLIB_CACHE_GET_URL=https://cache.mathlib.org/mathlib4 lake exe mathlib/cache get
+lake comparator
+```
+
+The first command fetches Mathlib's compiled files and nothing of ours. Don't use
+`lake exe cache get` here, because that also downloads our prebuilt copy of the submission. The
+second reads `comparator.json`, builds `Challenge` and `Main` in a sandbox with no network, and
+makes the checks described under [What is claimed](#what-is-claimed).
+
+The build is the expensive part, and compiling the submission runs its code. If you would
+rather build in a VM or a sandbox of your own, fetch Mathlib's cache as above, export the two
+modules yourself and hand them to Comparator:
+
+```bash
+export LEAN_ABORT_ON_PANIC=1        # as Comparator does
+export LAKE_ARTIFACT_CACHE=false    # in case cache-env.sh was sourced
+
+# in a clone where the submission has not been compiled
 lake build Challenge
 lake env leanexport Challenge -- $(cat export-targets.txt) > challenge.export
 
-# 2. Build the solution, in a second clone, inside a sandbox with no network. Takes hours.
-lake exe mathlib/cache get      # before entering the sandbox
-lake build Main                 # inside the sandbox
+# wherever you build the submission
+lake build Main
+lake env leanexport Main -- $(cat export-targets.txt) > solution.export
 
-# 3. Export the solution, still inside the sandbox.
-lake env leanexport Main -- $(cat "$CLEAN/export-targets.txt") > solution.export
-
-# 4. Judge, from an empty directory, with the same Lean release.
-lake comparator --config "$CLEAN/comparator.json" \
-  --challenge-from-export "$CLEAN/challenge.export" --solution-from-export solution.export
+# from an empty directory, with the same Lean release and comparator.json from the first clone
+lake comparator --config comparator.json \
+  --challenge-from-export challenge.export --solution-from-export solution.export
 ```
 
-Compiling the submission runs its code. That is why the challenge is exported first, in a clone
-where none of the submission has been compiled, and why the build and the second export happen
-in a sandbox that only `solution.export` leaves.
-
-Steps 1 and 2 use `lake exe mathlib/cache get` on purpose. Plain `lake exe cache get` would also
-download our prebuilt copy of the submission, and `lake build Main` would then compile nothing.
-
-All four steps use the Lean release in `lean-toolchain`, which comes with both `leanexport` and
-`lake comparator`. The published source was written for Lean 4.33.1, which has neither, so
-checking `40e56bab` itself takes two toolchains.
+The published source was written for Lean 4.33.1, which has neither `lake comparator` nor
+`leanexport`, so checking `40e56bab` itself takes two toolchains.
 [An older version of this README](https://github.com/leanprover-community/riemann-hypothesis/blob/7cce738ba719a32964ca3822d0994f4c6952c7ae/README.md#checking-it)
 has those steps.
 
-We worked these steps out on the published source and don't have a complete run on the current
-source yet. On the published source the build took hours on a large machine and about 100 GB of
-disk, and judging needs a lot of memory. [NOTES.md](verification/NOTES.md) says where the source
-came from, how the tools and sandboxes are set up and what a passing run does and doesn't show,
-but it still describes the Lean 4.33.1 setup.
+We don't have a complete run on the current source yet, by either route. On the published
+source the build took hours on a large machine and about 100 GB of disk, and judging needs a
+lot of memory. [NOTES.md](verification/NOTES.md) says where the source came from, how the tools
+and sandboxes are set up and what a passing run does and doesn't show, but it still describes
+the Lean 4.33.1 setup.
 
 ## CI
 
