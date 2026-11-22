@@ -1,6 +1,9 @@
 name: Label PR
 
-# Labels PRs that touch the build configuration, the challenge statement, CI or the README.
+# Labels PRs that touch the build configuration, the challenge statement, CI or the docs, and
+# labels each PR small, medium or large by the larger of its added and removed line counts:
+# under 100 is small, under 1,000 medium, and 1,000 or more large. The counts are GitHub's own
+# for the PR, so the job never downloads file contents.
 #
 # pull_request_target lets the token label PRs from forks. Nothing from the PR is checked out
 # or run: the job fetches commits and trees without file contents and lists the changed paths
@@ -29,7 +32,7 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - name: Add and remove labels for the paths this PR changes
+      - name: Add and remove labels for this PR's paths and size
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -75,11 +78,25 @@ jobs:
           flag documentation "$docs"
 
           api="repos/$GITHUB_REPOSITORY/issues/$PR"
-          current=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.sha)
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '"\(.head.sha) \(.additions) \(.deletions)"')
+          read -r current additions deletions <<< "$pr"
           if [[ "$current" != "$HEAD" ]]; then
             echo "The PR head has moved to $current; the run for that head applies its labels."
             exit 0
           fi
+
+          size=$(( additions > deletions ? additions : deletions ))
+          if (( size < 100 )); then
+            size_label=small
+          elif (( size < 1000 )); then
+            size_label=medium
+          else
+            size_label=large
+          fi
+          echo "$size_label: +$additions -$deletions"
+          for label in small medium large; do
+            if [[ "$label" == "$size_label" ]]; then add+=("$label"); else stale+=("$label"); fi
+          done
 
           if (( ${#add[@]} > 0 )); then
             args=()
