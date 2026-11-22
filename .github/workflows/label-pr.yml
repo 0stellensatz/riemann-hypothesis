@@ -5,7 +5,12 @@ name: Label PR
 # pull_request_target lets the token label PRs from forks. Nothing from the PR is checked out
 # or run: the job fetches commits and trees without file contents and lists the changed paths
 # with git. (The PR-files API, which actions/labeler uses, stops at 3,000 files; PRs here have
-# changed over 10,000.) Labels are only added, never removed, and must already exist.
+# changed over 10,000.) The labels must already exist.
+#
+# When a PR stops changing a label's paths, the label is removed only if this workflow added it
+# (its latest "labeled" event is by github-actions[bot]); labels people add are left alone.
+# Since labels can be removed, only the run for the PR's current head may apply them: newer
+# pushes cancel older runs, and a run whose head has moved on exits without changes.
 
 on:
   pull_request_target:
@@ -24,7 +29,7 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - name: Add labels for the paths this PR changes
+      - name: Add and remove labels for the paths this PR changes
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -56,19 +61,43 @@ jobs:
             esac
           done < changed
 
-          args=()
+          add=() stale=()
           flag() {
-            [[ -n "$2" ]] || return 0
-            printf '%s:\n%s' "$1" "$2"
-            args+=(-f "labels[]=$1")
+            if [[ -n "$2" ]]; then
+              printf '%s:\n%s' "$1" "$2"
+              add+=("$1")
+            else
+              stale+=("$1")
+            fi
           }
           flag changes-lake "$lake"
           flag changes-challenge "$challenge"
           flag CI "$ci"
           flag documentation "$docs"
 
-          if (( ${#args[@]} == 0 )); then
-            echo "No flagged paths changed."
+          api="repos/$GITHUB_REPOSITORY/issues/$PR"
+          current=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.sha)
+          if [[ "$current" != "$HEAD" ]]; then
+            echo "The PR head has moved to $current; the run for that head applies its labels."
             exit 0
           fi
-          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/labels" "${args[@]}" --silent
+
+          if (( ${#add[@]} > 0 )); then
+            args=()
+            for label in "${add[@]}"; do args+=(-f "labels[]=$label"); done
+            gh api --method POST "$api/labels" "${args[@]}" --silent
+          fi
+
+          present=$(gh api --paginate "$api/labels" --jq '.[].name')
+          for label in "${stale[@]}"; do
+            grep -qxF -- "$label" <<< "$present" || continue
+            # Events are oldest first, so the last line is whoever added the label most recently.
+            adder=$(gh api --paginate "$api/events" \
+              --jq ".[] | select(.event == \"labeled\" and .label.name == \"$label\") | .actor.login" | tail -n 1)
+            if [[ "$adder" == "github-actions[bot]" ]]; then
+              echo "Removing $label: its paths are no longer changed."
+              gh api --method DELETE "$api/labels/$label" --silent
+            else
+              echo "Keeping $label: added by ${adder:-unknown}, not by this workflow."
+            fi
+          done
