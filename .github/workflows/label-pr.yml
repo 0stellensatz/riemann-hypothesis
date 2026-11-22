@@ -1,9 +1,9 @@
 name: Label PR
 
 # Labels PRs that touch the build configuration, the challenge statement, CI or the docs, and
-# labels each PR small, medium or large by the larger of its added and removed line counts:
-# under 100 is small, under 1,000 medium, and 1,000 or more large. The counts are GitHub's own
-# for the PR, so the job never downloads file contents.
+# labels each PR small, medium, large or extra-large by the larger of its added and removed line
+# counts: under 100 is small, under 1,000 medium, under 10,000 large, and 10,000 or more
+# extra-large. The counts are GitHub's own for the PR, so the job never downloads file contents.
 #
 # pull_request_target lets the token label PRs from forks. Nothing from the PR is checked out
 # or run: the job fetches commits and trees without file contents and lists the changed paths
@@ -92,12 +92,14 @@ jobs:
             size_label=small
           elif (( size < 1000 )); then
             size_label=medium
-          else
+          elif (( size < 10000 )); then
             size_label=large
+          else
+            size_label=extra-large
           fi
           echo "$size_label: +$additions -$deletions"
           wrong_size=()
-          for label in small medium large; do
+          for label in small medium large extra-large; do
             if [[ "$label" == "$size_label" ]]; then add+=("$label"); else wrong_size+=("$label"); fi
           done
 
