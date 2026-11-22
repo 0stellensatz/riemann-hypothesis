@@ -71,16 +71,14 @@ lake comparator --config comparator.json \
   --challenge-from-export challenge.export --solution-from-export solution.export
 ```
 
-The published source was written for Lean 4.33.1, which has neither `lake comparator` nor
-`leanexport`, so checking `40e56bab` itself takes two toolchains.
+The published source uses Lean 4.33.1, which has neither `lake comparator` nor `leanexport`.
 [An older version of this README](https://github.com/leanprover-community/riemann-hypothesis/blob/7cce738ba719a32964ca3822d0994f4c6952c7ae/README.md#checking-it)
-has those steps.
+has the two-toolchain steps for checking it.
 
 ## CI
 
-If you have a Linux machine with
-plenty of memory and disk to spare, [CI-RUNNERS.md](verification/CI-RUNNERS.md) explains how to
-lend it. The scripts behind all this are in [`scripts/`](scripts/) and
+To lend a Linux machine with plenty of memory and disk, see
+[CI-RUNNERS.md](verification/CI-RUNNERS.md). The CI scripts are in [`scripts/`](scripts/) and
 [`tools/ci_native/`](tools/ci_native/README.md).
 
 ## License
