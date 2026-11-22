@@ -2,15 +2,16 @@
 
 [![checks](https://github.com/leanprover-community/riemann-hypothesis/actions/workflows/checks.yml/badge.svg)](https://github.com/leanprover-community/riemann-hypothesis/actions/workflows/checks.yml)
 
-Build cache for a Lean formalization the proof of the Riemann Hypothesis, and of GRH for Dirichlet L-functions. The first commit is as posted by Levent Alpöge, retrieved on 2026-11-20 at <https://alpo.ge/remark.pdf>.
+A Lean formalization of the Riemann Hypothesis, and of GRH for Dirichlet L-functions.
 
-It has been changed since. Pull requests have deleted files the proof doesn't use, shortened proofs, and
-ported it from Lean 4.33.1, which it was written for, to newer releases. The five theorems in
-`src/Main.lean` still have the names and types they were published with, and the definitions
-those types use, in `src/Statements.lean`, are unchanged. Their proofs are not the published
-ones. `git diff --stat 40e56bab HEAD -- src` lists everything that has changed. If you want the
-untouched original, check out `40e56bab` or use
-[riemann-hypothesis-original](https://github.com/homeowmorphism/riemann-hypothesis-original).
+Levent Alpöge announced it on 2026-11-20 ([remark.pdf](https://alpo.ge/remark.pdf)), and the
+first commit, `40e56bab`, is the source as posted. Since then pull requests have deleted files
+the proof doesn't use, shortened proofs, and ported it from Lean 4.33.1 to newer releases. The
+five theorems in `src/Main.lean`, and the definitions in `src/Statements.lean` that they are
+stated with, read exactly as published. `git diff --stat 40e56bab HEAD -- src` lists what has
+changed, and
+[riemann-hypothesis-original](https://github.com/homeowmorphism/riemann-hypothesis-original)
+keeps the original frozen.
 
 ## What is claimed
 
