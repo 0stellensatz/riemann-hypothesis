@@ -2,7 +2,7 @@
 
 [![checks](https://github.com/leanprover-community/riemann-hypothesis/actions/workflows/checks.yml/badge.svg)](https://github.com/leanprover-community/riemann-hypothesis/actions/workflows/checks.yml)
 
-A [Comparator](https://github.com/leanprover/comparator) setup and community build cache for the Lean formalization that
+Build cache for the Lean formalization that
 claims a proof of the Riemann Hypothesis, and of GRH for Dirichlet L-functions, announced on
 2026-11-20 at <https://alpo.ge/remark.pdf>.
 
