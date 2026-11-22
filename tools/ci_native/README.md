@@ -1,4 +1,9 @@
-This is a disabled, reviewable runtime transport adapter for the exact PR66 source tree
+The reviewed runtime adapter also has an explicit, separately pinned `native-proof`
+mode for bounded #91 proof batches. See [PROOFS.md](PROOFS.md). Runtime mode retains
+the restrictions below. The runner-group policy is unchanged; merge and dispatch
+require operator review.
+
+The runtime-only operation is a reviewable transport adapter for the exact PR66 source tree
 `0ba0b4d44fa26b97a376ec10889be6b553237103`. It does not repair proofs, execute project
 Lean source, call the old proof ShardWorker, promote a cache, register runners, or
 dispatch a workflow. The workflow is an .example file and the approved runner roster

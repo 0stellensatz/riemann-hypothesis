@@ -22,7 +22,7 @@ class ProtocolTests(unittest.TestCase):
    x=dict(self.snapshot);x[k]='wrong'
    with self.assertRaises(ValueError):r.snapshot_identity(x)
  def test_limits_and_registered_linux_only(self):
-  for key,val in [('cpus',0),('cpus',257),('memory_mib',0),('memory_mib',1048577),('timeout_seconds',0),('timeout_seconds',21601)]:
+  for key,val in [('cpus',0),('cpus',257),('memory_mib',0),('memory_mib',2097153),('timeout_seconds',0),('timeout_seconds',21601)]:
    h=self.hosts(1)[0];h[key]=val
    with self.assertRaises(ValueError):r.host(h)
   h=self.hosts(1)[0];h['runs_on']=['ubuntu-latest']

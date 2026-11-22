@@ -10,6 +10,24 @@ from pathlib import Path, PurePosixPath
 BASELINE_COMMIT = '9b1ee6011d0433c4c38a90508a14d39e33d608b6'
 SOURCE = '0ba0b4d44fa26b97a376ec10889be6b553237103'
 OPERATION = 'runtime-cache'
+PROOF_OPERATION = 'native-proof'
+PROOF_PARTS = ('.olean','.olean.server','.olean.private','.ilean','.ir.sig','.ir','.c','.trace')
+
+def proof_policy(): return read(Path(__file__).with_name('proof-policy.json'))
+
+def operation(value):
+    require(value in (OPERATION,PROOF_OPERATION),'unknown worker operation')
+    return value
+
+def proof_worklist(path):
+    policy=proof_policy();blob=Path(path).read_bytes()
+    require(hashlib.sha256(blob).hexdigest()==policy['worklist_sha256'],'unapproved proof worklist')
+    names=blob.decode().splitlines()
+    require(len(names)==policy['worklist_modules'] and names==sorted(set(names)),'invalid proof worklist')
+    return {module_name(x) for x in names}
+
+def proof_path(path):
+    return any(PurePosixPath(path).name.endswith(s) for s in PROOF_PARTS+tuple(x+'.hash' for x in PROOF_PARTS))
 SHA = re.compile(r'^[0-9a-f]{64}$')
 IDENT = re.compile(r'^[A-Za-z0-9_-]{1,80}$')
 MAX_FILES = 2_000_000
@@ -49,18 +67,19 @@ def regular(root, rel, exists=True):
     if exists:require(p.is_file() and stat.S_ISREG(p.stat().st_mode),'not a regular artifact')
     return p
 
-def snapshot_identity(snapshot):
-    expected=read(Path(__file__).with_name('identity.json'))
+def snapshot_identity(snapshot, mode=OPERATION):
+    operation(mode)
+    expected=proof_policy()['snapshot'] if mode==PROOF_OPERATION else read(Path(__file__).with_name('identity.json'))
     require(bool(re.fullmatch(r'[0-9a-f]{40}',snapshot.get('git_commit',''))),'invalid candidate commit pin')
     for key,value in expected.items():require(snapshot.get(key)==value,'candidate identity mismatch: '+key)
     require(bool(SHA.fullmatch(snapshot.get('fingerprint',''))),'invalid source fingerprint')
     return snapshot
 
-def verify_source(root, snapshot):
-    snapshot_identity(snapshot);root=Path(root)
+def verify_source(root, snapshot, mode=OPERATION):
+    snapshot_identity(snapshot,mode);root=Path(root)
     def git(*a):return subprocess.check_output(['git','-C',str(root),*a],text=True).strip()
     require(git('rev-parse','HEAD')==snapshot['git_commit'],'source HEAD changed')
-    require(git('rev-parse','HEAD:src')==SOURCE,'source tree changed')
+    require(git('rev-parse','HEAD:src')==snapshot['source_tree'],'source tree changed')
     for name,key in [('lakefile.toml','lakefile_sha256'),('lake-manifest.json','manifest_sha256')]:
         require(digest(root/name)==snapshot[key],'raw configuration changed: '+name)
     require((root/'lean-toolchain').read_text().strip()==snapshot['toolchain'],'toolchain changed')
@@ -146,12 +165,12 @@ def host(value):
     require(isinstance(value.get('runner_name'),str)and value['runner_name'],'runner name required')
     labels=value.get('runs_on');require(isinstance(labels,list)and labels and all(isinstance(x,str)and x for x in labels),'runner labels required')
     require('self-hosted'in labels and 'Linux'in labels and 'X64'in labels,'registered Linux/X64 runner required')
-    for key,lo,hi in [('cpus',1,256),('memory_mib',512,1048576),('timeout_seconds',1,21600)]:
+    for key,lo,hi in [('cpus',1,256),('memory_mib',512,2097152),('timeout_seconds',1,21600)]:
         require(type(value.get(key))is int and lo<=value[key]<=hi,'invalid resource limit: '+key)
     return value
 
-def plan(snapshot, missing, hosts, run_id, attempt, workflow_sha, producer_sha, input_manifest_sha, output, now=None):
-    snapshot_identity(snapshot);require(str(run_id).isdigit()and int(run_id)>0,'invalid workflow run ID')
+def plan(snapshot, missing, hosts, run_id, attempt, workflow_sha, producer_sha, input_manifest_sha, output, now=None, mode=OPERATION, worklist=None):
+    snapshot_identity(snapshot,mode);require(str(run_id).isdigit()and int(run_id)>0,'invalid workflow run ID')
     require(type(attempt)is int and attempt>0,'invalid run attempt')
     require(re.fullmatch(r'[0-9a-f]{40}',workflow_sha)and SHA.fullmatch(producer_sha) and SHA.fullmatch(input_manifest_sha),'unbound trusted code/input')
     require(1<=len(hosts)<=256,'worker count out of range');hosts=[host(dict(x))for x in hosts]
@@ -161,6 +180,12 @@ def plan(snapshot, missing, hosts, run_id, attempt, workflow_sha, producer_sha, 
     for row in missing['modules']:
         m=module_name(row['module']);require(m not in seen,'duplicate task');seen.add(m)
         weight=row.get('project_closure_archived_bytes',row.get('bytes',1));require(type(weight)is int and 0<weight<=MAX_BYTES,'invalid work weight');work.append((m,weight))
+    if mode==PROOF_OPERATION:
+        policy=proof_policy();allowed=proof_worklist(worklist)
+        require(seen<=allowed,'proof request outside pinned affected worklist')
+        for h in hosts:
+            require(h['cpus']>=policy['minimum_cpus'] and h['memory_mib']>=policy['minimum_memory_mib'],'proof worker capacity below approved minimum')
+        require(len(work)<=policy['max_batch_modules']*len(hosts),'proof batch exceeds bounded lease limit')
     groups={h['id']:[]for h in hosts};loads={h['id']:0 for h in hosts}
     for m,w in sorted(work,key=lambda x:(-x[1],x[0])):
         h=min(hosts,key=lambda x:(loads[x['id']]/x['cpus'],len(groups[x['id']]),x['id']))
@@ -168,19 +193,25 @@ def plan(snapshot, missing, hosts, run_id, attempt, workflow_sha, producer_sha, 
     created=int(time.time()if now is None else now);matrix=[];out=Path(output)
     for h in hosts:
         names=groups[h['id']]
+        if mode==PROOF_OPERATION:require(len(names)<=proof_policy()['max_batch_modules'],'proof batch exceeds worker limit')
         if not names:continue # Empty NEVER invokes a default Lake target.
         request={'snapshot':snapshot['fingerprint'],'modules':names,'verify':['input-manifest.json']}
         request_sha=rawsha(request);lease_id=hashlib.sha256(f'{run_id}:{attempt}:{h["id"]}:{request_sha}'.encode()).hexdigest()
-        lease={'snapshot':snapshot,'operation':OPERATION,'batch':0,'worker':h,'lease_id':lease_id,'request_sha256':request_sha,
+        lease={'snapshot':snapshot,'operation':mode,'batch':0,'worker':h,'lease_id':lease_id,'request_sha256':request_sha,
                'run_id':str(run_id),'run_attempt':attempt,'workflow_sha':workflow_sha,'producer_sha256':producer_sha,
                'input_manifest_sha256':input_manifest_sha,'created_at':created,'expires_at':created+h['timeout_seconds']+1800}
+        
+        if mode==PROOF_OPERATION:
+            lease['proof_worklist_sha256']=digest(worklist)
+            (out/h['id']).mkdir(parents=True,exist_ok=True)
+            (out/h['id']/'proof-worklist.txt').write_bytes(Path(worklist).read_bytes())
         atomic(out/h['id']/'request-0.json',request);atomic(out/h['id']/'lease.json',lease)
         matrix.append({**h,'lease_id':lease_id,'timeout_minutes':min(360,(h['timeout_seconds']+3599)//60)})
     atomic(out/'matrix.json',{'include':matrix});atomic(out/'snapshot.json',snapshot)
     return {'include':matrix}
 
 def check_lease(lease, request, run_id, attempt, runner, now=None):
-    snapshot_identity(lease['snapshot']);require(lease.get('operation')==OPERATION,'proof/source elaboration forbidden')
+    mode=operation(lease.get('operation'));snapshot_identity(lease['snapshot'],mode)
     require(str(run_id)==lease['run_id']and attempt==lease['run_attempt'],'stale/foreign GHA run')
     require(runner==lease['worker']['runner_name'],'runner identity mismatch');host(lease['worker'])
     now=int(time.time()if now is None else now);require(lease['created_at']<=now<=lease['expires_at'],'expired/future lease')
@@ -188,6 +219,11 @@ def check_lease(lease, request, run_id, attempt, runner, now=None):
     require(request['snapshot']==lease['snapshot']['fingerprint'],'request source mismatch')
     names=[module_name(x)for x in request['modules']];require(names and len(names)==len(set(names)),'empty/duplicate work')
     require(request.get('verify')==['input-manifest.json'],'arbitrary verification path forbidden')
+    if mode==PROOF_OPERATION:
+        policy=proof_policy()
+        require(lease.get('proof_worklist_sha256')==policy['worklist_sha256'],'unbound proof worklist')
+        require(len(names)<=policy['max_batch_modules'],'proof batch too large')
+        require(lease['worker']['cpus']>=policy['minimum_cpus'] and lease['worker']['memory_mib']>=policy['minimum_memory_mib'],'proof worker too small')
     return names
 
 def current_cgroup():
@@ -257,34 +293,43 @@ def no_network():
 
 def worker(root, control, output, producer, run_id, attempt, runner):
     control=Path(control);out=Path(output);lease=read(control/'lease.json');request=read(control/'request-0.json')
-    names=check_lease(lease,request,run_id,attempt,runner);require(no_network(),'runtime execution requires network-none isolation');resource_limits(lease['worker'])
+    names=check_lease(lease,request,run_id,attempt,runner);mode=lease['operation'];require(no_network(),'runtime execution requires network-none isolation');resource_limits(lease['worker'])
     require(digest(producer)==lease['producer_sha256'],'unreviewed runtime producer')
-    verify_source(root,lease['snapshot']);fp=lease['snapshot']['fingerprint'];inputs=read(control/'input-manifest.json');require(digest(control/'input-manifest.json')==lease['input_manifest_sha256'],'foreign input manifest')
+    verify_source(root,lease['snapshot'],mode);fp=lease['snapshot']['fingerprint'];inputs=read(control/'input-manifest.json');require(digest(control/'input-manifest.json')==lease['input_manifest_sha256'],'foreign input manifest')
     archive=lease['worker'].get('archive_root')
     receipt=None
     if archive:
         require(digest(control/'verified-archive.json')==lease['worker']['archive_receipt_sha256'],'foreign archive receipt')
         receipt=read(control/'verified-archive.json');verify_flat(archive,inputs,fp,receipt)
-    else:verify_manifest(root,inputs,fp)
+    else:
+        if mode==PROOF_OPERATION:
+            from proof_baseline import restore
+            restore(root,control,lease['worker'])
+        verify_manifest(root,inputs,fp)
     input_paths={row['path']for row in inputs['files']}
+    if mode==PROOF_OPERATION:
+        require(not archive,'proof workers use native dependency manifests, not the volunteer runtime archive')
+        require(set(names)<=proof_worklist(control/'proof-worklist.txt'),'unapproved proof modules')
+        require(not(set(names)&set(inputs['modules'])),'requested proof targets must not have stale input artifacts')
     for name in names:
         stem='/'.join(name.split('.'))
         source=Path(root)/'src'/Path(stem+'.lean')
         require(source.is_file() and not source.is_symlink(),'canonical project source absent')
-        require('.lake/build/ir/'+stem+'.ir'in input_paths and '.lake/build/lib/lean/'+stem+'.olean'in input_paths,'published IR/olean absent; source elaboration fallback forbidden')
-    protected={row['path']:row['sha256']for row in inputs['files']}if archive else {row['path']:row['sha256']for row in inputs['files']if any(row['path'].endswith(s)for s in ['.olean','.olean.private','.olean.server','.ir','.ilean'])}
+        if mode==OPERATION:require('.lake/build/ir/'+stem+'.ir'in input_paths and '.lake/build/lib/lean/'+stem+'.olean'in input_paths,'published IR/olean absent; source elaboration fallback forbidden')
+    protected={row['path']:row['sha256']for row in inputs['files']}if (archive or mode==PROOF_OPERATION) else {row['path']:row['sha256']for row in inputs['files']if any(row['path'].endswith(s)for s in ['.olean','.olean.private','.olean.server','.ir','.ilean'])}
     out.mkdir(parents=True,exist_ok=True);raw=out/'result-0.json'
     env={'PATH':os.environ.get('PATH','/usr/bin:/bin'),'HOME':'/tmp/native-home','TMPDIR':'/tmp','LANG':'C.UTF-8',
-         'LEAN_NUM_THREADS':str(lease['worker']['cpus']),'NATIVE_MEMORY_MIB':str(lease['worker']['memory_mib']),'NATIVE_SETUP_ROOT':str(control/'setups'),'NATIVE_OPERATION':OPERATION}
+         'LEAN_NUM_THREADS':str(lease['worker']['cpus']),'NATIVE_MEMORY_MIB':str(lease['worker']['memory_mib']),'NATIVE_SETUP_ROOT':str(control/'setups'),'NATIVE_OPERATION':mode}
+    if mode==PROOF_OPERATION:env.update(NATIVE_PACKAGE_ROOT=lease['worker']['dependency_root'],NATIVE_TOOLCHAIN_ROOT=lease['worker']['toolchain_root'],NATIVE_PRODUCER_JOBS=str(lease['worker'].get('jobs',1)))
     if archive:env.update(NATIVE_ARCHIVE_ROOT=archive,NATIVE_PACKAGE_ROOT=lease['worker']['dependency_root'],NATIVE_TOOLCHAIN_ROOT=lease['worker']['toolchain_root'],NATIVE_PRODUCER_JOBS=str(lease['worker'].get('jobs',1)))
-    atomic(out/'ready.json',{'snapshot':fp,'worker':'runtime-only-fileRPC','operation':OPERATION,'lease_id':lease['lease_id'],'runner_name':runner})
+    atomic(out/'ready.json',{'snapshot':fp,'worker':'runtime-only-fileRPC','operation':mode,'lease_id':lease['lease_id'],'runner_name':runner})
     start=time.monotonic()
     # Fixed reviewed backend contract; no command, shell, facets or flags supplied by candidate data.
     proc=subprocess.run([str(Path(producer).resolve()),'--workspace',str(Path(root).resolve()),'--request',str(control/'request-0.json'),'--result',str(raw)],
                         env=env,cwd=root,timeout=lease['worker']['timeout_seconds'],capture_output=True)
     (out/'producer.stdout').write_bytes(proc.stdout);(out/'producer.stderr').write_bytes(proc.stderr)
     require(proc.returncode==0,'runtime producer failed; no retry/reassignment performed')
-    verify_source(root,lease['snapshot'])
+    verify_source(root,lease['snapshot'],mode)
     by_path={row['path']:row for row in inputs['files']}
     for rel,sha in protected.items():require(digest(flat_file(archive,by_path[rel])if archive else regular(root,rel))==sha,'published archived part changed')
     result=read(raw);rows=result.get('modules',[])
@@ -295,11 +340,11 @@ def worker(root, control, output, producer, run_id, attempt, runner):
     generated=read(manifest);baseline={r['path']:r['sha256']for r in inputs['files']}
     generated['files']=[r for r in generated['files']if baseline.get(r['path'])!=r['sha256']]
     for row in generated['files']:
-        require(runtime_path(row['path']),'proof-interface/non-runtime output forbidden')
+        require(proof_path(row['path']) if mode==PROOF_OPERATION else runtime_path(row['path']),'unexpected output kind')
     atomic(manifest,generated);verify_manifest(root,generated,fp,names)
-    with zipfile.ZipFile(out/'runtime-parts.zip','w',compression=zipfile.ZIP_STORED)as z:
+    with zipfile.ZipFile(out/'runtime-parts.zip','w',compression=zipfile.ZIP_DEFLATED if mode==PROOF_OPERATION else zipfile.ZIP_STORED,compresslevel=1 if mode==PROOF_OPERATION else None)as z:
         for row in generated['files']:z.write(regular(root,row['path']),row['path'])
-    response={'snapshot':fp,'batch':0,'elapsed_ms':int((time.monotonic()-start)*1000),'operation':OPERATION,
+    response={'snapshot':fp,'batch':0,'elapsed_ms':int((time.monotonic()-start)*1000),'operation':mode,
               'result':result,'artifacts':{'manifest':'artifacts-0.json','sha256':digest(manifest)},
               'lease_id':lease['lease_id'],'request_sha256':lease['request_sha256'],'run_id':str(run_id),'run_attempt':attempt,'runner_name':runner}
     atomic(out/'response-0.json',response)
@@ -308,17 +353,27 @@ def worker(root, control, output, producer, run_id, attempt, runner):
 def accept(control, returned, provenance, now=None):
     """Verify only: caller retains exclusive authority to promote into the final cache."""
     control=Path(control);returned=Path(returned);lease=read(control/'lease.json');request=read(control/'request-0.json')
+    mode=operation(lease['operation'])
     names=check_lease(lease,request,provenance['run_id'],provenance['run_attempt'],provenance['runner_name'],now)
     require(provenance['workflow_sha']==lease['workflow_sha'],'foreign workflow code')
     require(provenance['artifact_name']==f'native-{lease["run_id"]}-{lease["run_attempt"]}-{lease["lease_id"]}','foreign artifact identity')
     r=read(returned/'response-0.json')
-    for k,v in [('snapshot',lease['snapshot']['fingerprint']),('operation',OPERATION),('lease_id',lease['lease_id']),('request_sha256',lease['request_sha256']),('run_id',lease['run_id']),('run_attempt',lease['run_attempt']),('runner_name',lease['worker']['runner_name'])]:require(r.get(k)==v,'response identity mismatch: '+k)
+    for k,v in [('snapshot',lease['snapshot']['fingerprint']),('operation',mode),('lease_id',lease['lease_id']),('request_sha256',lease['request_sha256']),('run_id',lease['run_id']),('run_attempt',lease['run_attempt']),('runner_name',lease['worker']['runner_name'])]:require(r.get(k)==v,'response identity mismatch: '+k)
     require(r.get('batch')==0,'foreign runtime batch')
     rows=r['result']['modules'];require([x['module']for x in rows]==names and all(type(x.get('ok'))is bool for x in rows),'response module mismatch');require(r['result'].get('ok')==all(x['ok']for x in rows),'runtime summary mismatch');successful=[x['module']for x in rows if x['ok']]
     require(r['artifacts'].get('manifest')=='artifacts-0.json'and digest(returned/'artifacts-0.json')==r['artifacts']['sha256'],'manifest response SHA mismatch')
     manifest=read(returned/'artifacts-0.json');require(manifest.get('modules')==successful,'manifest work mismatch')
-    verify_zip(returned/'runtime-parts.zip',manifest,lease['snapshot']['fingerprint'],names,runtime_only=True)
-    return {'verified_transport':True,'operation':OPERATION,'native_proof_check':'NOT_PERFORMED','lease_id':lease['lease_id'],
+    if mode==PROOF_OPERATION:
+        require(set(names)<=proof_worklist(control/'proof-worklist.txt'),'proof worklist mismatch')
+        require(all(proof_path(row['path']) for row in manifest['files']),'unexpected proof output kind')
+        paths={row['path'] for row in manifest['files']}
+        for name in successful:
+            stem=name.replace('.','/')
+            for suffix in PROOF_PARTS:
+                part='ir' if suffix=='.c' else 'lib/lean'
+                require(f'.lake/build/{part}/{stem}{suffix}' in paths,'successful proof missing complete output: '+name+suffix)
+    verify_zip(returned/'runtime-parts.zip',manifest,lease['snapshot']['fingerprint'],names,runtime_only=mode==OPERATION)
+    return {'verified_transport':True,'operation':mode,'native_proof_check':'NOT_PERFORMED','lease_id':lease['lease_id'],
             'manifest_sha256':r['artifacts']['sha256'],'modules':successful,'failed_modules':[x['module']for x in rows if not x['ok']],'promotion_performed':False}
 
 def main():

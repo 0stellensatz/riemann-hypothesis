@@ -5,6 +5,32 @@ from pathlib import Path
 import rpc
 from producer import dependency_paths
 
+def dependency_mounts(root,deps,output,packages,overlay):
+    """Only private upper/copy paths are writable; original caches stay read-only."""
+    argv=[]
+    for package in packages:
+        name=rpc.module_name(package['name'])
+        destination=root/'.lake/packages'/name
+        private=output/'dependency-overlays'/name
+        if overlay:
+            upper,work=private/'upper',private/'work'
+            upper.mkdir(parents=True,exist_ok=True);work.mkdir(exist_ok=True)
+            argv+=['--overlay-src',str(deps/name),'--overlay',str(upper),str(work),str(destination)]
+        else:
+            copied=private/'copy';copied.mkdir(parents=True,exist_ok=True)
+            for entry in (deps/name).iterdir():
+                if entry.name=='.git':continue
+                subprocess.run(['cp','-a','--reflink=auto','--no-preserve=ownership',
+                                str(entry),str(copied/entry.name)],check=True,
+                               env={'PATH':os.environ.get('PATH','/usr/bin:/bin')})
+            argv+=['--bind',str(copied),str(destination)]
+            metadata=deps/name/'.git'
+            if metadata.exists():
+                if metadata.is_dir():(copied/'.git').mkdir(exist_ok=True)
+                else:(copied/'.git').touch()
+                argv+=['--ro-bind',str(metadata),str(destination/'.git')]
+    return argv
+
 def command(root,control,output,producer,run_id,attempt,runner):
     root=Path(root).resolve();control=Path(control).resolve();output=Path(output).resolve();producer=Path(producer).resolve()
     lease=rpc.read(control/'lease.json');request=rpc.read(control/'request-0.json')
@@ -13,7 +39,20 @@ def command(root,control,output,producer,run_id,attempt,runner):
     rpc.require((root/'.lake/build').is_dir(),'use a private candidate checkout with an existing empty .lake/build')
     rpc.require(not (root/'.lake/build').is_symlink(),'cache mount must not be a symlink')
     output.mkdir(parents=True,exist_ok=True);cache=output/'cache';cache.mkdir(exist_ok=True);returned=output/'returned';returned.mkdir(exist_ok=True)
-    worker=lease['worker'];archive=Path(worker['archive_root']).resolve();deps=Path(worker['dependency_root']).resolve();tc=Path(worker['toolchain_root']).resolve()
+    worker=lease['worker'];proof=lease['operation']==rpc.PROOF_OPERATION
+    archive=Path(worker['archive_root']).resolve() if not proof else None
+    deps=Path(worker['dependency_root']).resolve();tc=Path(worker['toolchain_root']).resolve()
+    if proof:
+        rpc.require(producer.name=='proof_producer.py','wrong proof wrapper')
+        rpc.require(set(request['modules'])<=rpc.proof_worklist(control/'proof-worklist.txt'),'unapproved proof targets')
+        inputs=rpc.read(control/'input-manifest.json')
+        rpc.require(rpc.digest(control/'input-manifest.json')==lease['input_manifest_sha256'],'unbound proof inputs')
+        rpc.require(not set(request['modules'])&set(inputs['modules']),'stale target artifacts in proof inputs')
+        seed=output/'seed';seed.mkdir(exist_ok=True)
+        rpc.stage_zip(control/'input-parts.zip',seed,inputs,lease['snapshot']['fingerprint'])
+        cache=seed/'.lake/build';cache.mkdir(parents=True,exist_ok=True)
+        rpc.require((root/'.lake/packages').is_dir() and not(root/'.lake/packages').is_symlink(),
+                    'private checkout requires an empty real package mountpoint')
     libs={Path(x)for x in dependency_paths(deps,root/'lake-manifest.json')}
     tools=Path(__file__).parent.resolve()
     rpc.require(producer.parent==tools,'backend wrapper must belong to the trusted tools bundle')
@@ -28,8 +67,19 @@ def command(root,control,output,producer,run_id,attempt,runner):
         argv+=['--ro-bind',name,name]
     sw=Path('/run/current-system/sw')
     if sw.exists():argv+=['--ro-bind',str(sw.resolve()),str(sw)]
-    for path in sorted({root,tools,control,archive,deps,tc,*libs},key=lambda p:(len(p.parts),str(p))):
+    mounts={root,tools,control,deps,tc,*libs}
+    if archive:mounts.add(archive)
+    if proof:mounts.add(Path(worker['baseline_cache_root']).resolve())
+    for path in sorted(mounts,key=lambda p:(len(p.parts),str(p))):
         argv+=['--ro-bind',str(path),str(path)]
+    if proof:
+        private_lake=output/'project-lake'
+        for directory in ['build','packages','config']:
+            (private_lake/directory).mkdir(parents=True,exist_ok=True)
+        argv+=['--bind',str(private_lake),str(root/'.lake')]
+        argv+=['--ro-bind',str(deps),str(root/'.lake/packages')]
+        overlay='--overlay-src' in subprocess.check_output(['bwrap','--help'],text=True)
+        argv+=dependency_mounts(root,deps,output,rpc.read(root/'lake-manifest.json')['packages'],overlay)
     argv+=['--bind',str(cache),str(root/'.lake/build'),'--bind',str(returned),str(returned)]
     env={'PATH':str(tc/'bin')+':/usr/bin:/bin:/run/current-system/sw/bin','HOME':'/tmp/native-home','LANG':'C.UTF-8',
          'GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':'/dev/null'}

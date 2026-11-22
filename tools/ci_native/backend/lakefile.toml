@@ -4,3 +4,9 @@ name = "runtimeproducer436"
 name = "runtime-producer"
 root = "RuntimeProducer"
 supportInterpreter = true
+
+[[lean_exe]]
+name = "proof-producer"
+root = "ProofProducer"
+supportInterpreter = true
+moreLinkArgs = ["-lLake"]
