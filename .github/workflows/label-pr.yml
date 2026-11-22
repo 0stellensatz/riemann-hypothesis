@@ -52,11 +52,11 @@ jobs:
             esac
             case "$path" in
               .github/* | scripts/* | tools/* | .gitattributes | \
-              verification/CACHE.md | verification/CI-RUNNERS.md | verification/PORTABLE-CACHE.md)
+              verification/CI-RUNNERS.md | verification/PORTABLE-CACHE.md)
                 ci+="  $path"$'\n' ;;
             esac
             case "$path" in
-              README.md)
+              README.md | verification/CACHE.md)
                 docs+="  $path"$'\n' ;;
             esac
           done < changed
