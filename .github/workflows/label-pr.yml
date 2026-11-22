@@ -1,0 +1,74 @@
+name: Label PR
+
+# Labels PRs that touch the build configuration, the challenge statement, CI or the README.
+#
+# pull_request_target lets the token label PRs from forks. Nothing from the PR is checked out
+# or run: the job fetches commits and trees without file contents and lists the changed paths
+# with git. (The PR-files API, which actions/labeler uses, stops at 3,000 files; PRs here have
+# changed over 10,000.) Labels are only added, never removed, and must already exist.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+concurrency:
+  group: label-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Add labels for the paths this PR changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git init -q pr
+          git -C pr fetch -q --no-tags --filter=blob:none "https://github.com/$GITHUB_REPOSITORY" "$BASE" "$HEAD"
+          git -C pr diff -z --name-only --no-renames "$BASE...$HEAD" > changed
+
+          lake='' challenge='' ci='' docs=''
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              lakefile.toml | lakefile.lean | lake-manifest.json | lean-toolchain)
+                lake+="  $path"$'\n' ;;
+            esac
+            case "$path" in
+              src/Challenge.lean | comparator.json | export-targets.txt)
+                challenge+="  $path"$'\n' ;;
+            esac
+            case "$path" in
+              .github/* | scripts/* | tools/* | .gitattributes | \
+              verification/CACHE.md | verification/CI-RUNNERS.md | verification/PORTABLE-CACHE.md)
+                ci+="  $path"$'\n' ;;
+            esac
+            case "$path" in
+              README.md)
+                docs+="  $path"$'\n' ;;
+            esac
+          done < changed
+
+          args=()
+          flag() {
+            [[ -n "$2" ]] || return 0
+            printf '%s:\n%s' "$1" "$2"
+            args+=(-f "labels[]=$1")
+          }
+          flag changes-lake "$lake"
+          flag changes-challenge "$challenge"
+          flag CI "$ci"
+          flag documentation "$docs"
+
+          if (( ${#args[@]} == 0 )); then
+            echo "No flagged paths changed."
+            exit 0
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/labels" "${args[@]}" --silent
