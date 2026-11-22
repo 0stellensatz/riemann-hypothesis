@@ -17,7 +17,9 @@ def accept(control, returned, provenance, proxy_root, proxy_round, coordinator_l
     rpc.require(durable['snapshot'] == lease['snapshot'], 'coordinator source changed')
     active = durable['workers'][worker_id]
     rpc.require(active is not None and active['batch'] == batch and
-                active['modules'] == expected['modules'] == request['modules'], 'coordinator lease mismatch')
+                active['modules'] == expected['modules'], 'coordinator lease mismatch')
+    rpc.require(len(set(request['modules'])) == len(request['modules']) and
+                set(active['modules']) == set(request['modules']), 'coordinator work scope mismatch')
     rpc.require(expected['snapshot'] == lease['snapshot']['fingerprint'], 'proxy snapshot mismatch')
     destination = proxy_round / f'response-{batch}.json'
     rpc.require(not destination.exists(), 'coordinator response already exists')
@@ -29,8 +31,12 @@ def accept(control, returned, provenance, proxy_root, proxy_round, coordinator_l
     original = rpc.read(returned / 'response-0.json')
     manifest_path = proxy_round / f'artifacts-{batch}.json'
     rpc.atomic(manifest_path, manifest)
+    # Actions may rebalance the same exact scope into a different order. Preserve
+    # its original response and translate only the coordinator's ordered view.
+    by_name = {row['module']: row for row in original['result']['modules']}
+    result = {**original['result'], 'modules': [by_name[name] for name in active['modules']]}
     response = {'snapshot': expected['snapshot'], 'batch': batch,
-                'elapsed_ms': original['elapsed_ms'], 'result': original['result'],
+                'elapsed_ms': original['elapsed_ms'], 'result': result,
                 'artifacts': {'manifest': str(manifest_path), 'sha256': rpc.digest(manifest_path),
                               'files': len(manifest['files']), 'modules': len(manifest['modules']),
                               'bytes': sum(row['bytes'] for row in manifest['files'])}}
