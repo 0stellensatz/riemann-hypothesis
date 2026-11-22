@@ -52,6 +52,8 @@ The first command fetches Mathlib's compiled files and nothing of ours. Don't us
 second reads `comparator.json`, builds `Challenge` and `Main` in a sandbox with no network, and
 makes the checks described under [Theorem Statements](#theorem-statements).
 
+Compiling the submission runs its code, so you may want to do it in a VM or your own sandbox. To do that, fetch Mathlib's cache as above, then run the check in three steps:
+
 ```bash
 export LEAN_ABORT_ON_PANIC=1        # as Comparator does
 export LAKE_ARTIFACT_CACHE=false    # in case cache-env.sh was sourced
