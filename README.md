@@ -8,10 +8,11 @@ claims a proof of the Riemann Hypothesis, and of GRH for Dirichlet L-functions, 
 
 The first commit, `40e56bab`, is the Lean source exactly as it was published. It has been
 changed since. Pull requests have deleted files the proof doesn't use, shortened proofs, and
-ported it from Lean 4.33.1, which it was written for, to newer releases. The five theorem
-statements are still word for word the published ones, and
-`git diff --stat 40e56bab HEAD -- src` lists everything else. If you want the untouched
-original, check out `40e56bab` or use
+ported it from Lean 4.33.1, which it was written for, to newer releases. The five theorems in
+`src/Main.lean` still have the names and types they were published with, and the definitions
+those types use, in `src/Statements.lean`, are unchanged. Their proofs are not the published
+ones. `git diff --stat 40e56bab HEAD -- src` lists everything that has changed. If you want the
+untouched original, check out `40e56bab` or use
 [riemann-hypothesis-original](https://github.com/homeowmorphism/riemann-hypothesis-original).
 
 ## What is claimed
