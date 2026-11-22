@@ -26,7 +26,7 @@ those statements, that it uses no axioms other than `propext`, `Quot.sound` and
 
 ## Cache
 
-A full build takes hours, so you should use the cache. 
+A full build takes hours, so you should use the cache:
 
 ```bash
 lake exe cache get
