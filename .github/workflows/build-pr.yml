@@ -329,6 +329,12 @@ jobs:
           SECONDS_LIMIT: ${{ matrix.timeout_seconds }}
         run: |
           umask 077
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          if [[ ! -S "$XDG_RUNTIME_DIR/bus" ]]; then
+            echo "The dedicated runner account has no systemd user bus at $XDG_RUNTIME_DIR/bus; check its user manager and loginctl linger setting." >&2
+            exit 1
+          fi
           systemd-run --user --wait --collect --pipe --unit="rh-proof-${RUN_ID}-${ATTEMPT}-${ID}" \
             -p "CPUQuota=$((CPUS*100))%" -p "MemoryMax=${MEMORY}M" -p MemorySwapMax=0 \
             -p TasksMax=16384 -p LimitSTACK=infinity -p "RuntimeMaxSec=$((SECONDS_LIMIT+120))" \
@@ -411,6 +417,12 @@ jobs:
         run: |
           umask 077
           export PATH="$HOME/.elan/bin:$PATH"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          if [[ ! -S "$XDG_RUNTIME_DIR/bus" ]]; then
+            echo "The dedicated runner account has no systemd user bus at $XDG_RUNTIME_DIR/bus; check its user manager and loginctl linger setting." >&2
+            exit 1
+          fi
           systemd-run --user --wait --collect --pipe --unit="rh-quick-${RUN_ID}-${ATTEMPT}" \
             -p CPUQuota=800% -p MemoryMax=64G -p MemorySwapMax=0 -p TasksMax=16384 \
             -p LimitNOFILE=65536 -p LimitSTACK=infinity -p RuntimeMaxSec=1800 \
