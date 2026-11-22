@@ -7,11 +7,11 @@ claims a proof of the Riemann Hypothesis, and of GRH for Dirichlet L-functions, 
 2026-11-20 at <https://alpo.ge/remark.pdf>.
 
 The first commit, `40e56bab`, is the Lean source exactly as it was published. It has been
-changed since. Pull requests have deleted files the proof doesn't use and shortened proofs, and
-[#66](https://github.com/leanprover-community/riemann-hypothesis/pull/66) ported the whole thing
-from Lean 4.33.1 to Lean 4.36.0. The five theorem statements are still word for word the
-published ones, and `git diff --stat 40e56bab HEAD -- src` lists everything else. If you want
-the untouched original, check out `40e56bab` or use
+changed since. Pull requests have deleted files the proof doesn't use, shortened proofs, and
+ported it from Lean 4.33.1, which it was written for, to newer releases. The five theorem
+statements are still word for word the published ones, and
+`git diff --stat 40e56bab HEAD -- src` lists everything else. If you want the untouched
+original, check out `40e56bab` or use
 [riemann-hypothesis-original](https://github.com/homeowmorphism/riemann-hypothesis-original).
 
 ## What is claimed
@@ -42,9 +42,10 @@ lake build --no-build
 
 The first command needs Python 3.11 or newer. It downloads Mathlib's cache and then ours. Ours
 has to match your checkout exactly. It looks for a successful CI build of the same source
-(commits that only change documentation share one) and, failing that, for the build that came
-with the Lean 4.36 port. If nothing matches, it says so and you are left with `lake build`. The
-second command confirms that there is nothing left to compile.
+(commits that only change documentation share one) and, failing that, for the baseline build
+pinned in [`scripts/cache-baselines.json`](scripts/cache-baselines.json). If nothing matches,
+it says so and you are left with `lake build`. The second command confirms that there is
+nothing left to compile.
 
 Don't treat the cache as a check of the proof. It contains files built from unreviewed pull
 requests on volunteers' machines, and all the download verifies is that you received what was
@@ -71,7 +72,7 @@ lake build Main                 # inside the sandbox
 # 3. Export the solution, still inside the sandbox.
 lake env leanexport Main -- $(cat "$CLEAN/export-targets.txt") > solution.export
 
-# 4. Judge, from an empty directory.
+# 4. Judge, from an empty directory, with the same Lean release.
 lake comparator --config "$CLEAN/comparator.json" \
   --challenge-from-export "$CLEAN/challenge.export" --solution-from-export solution.export
 ```
@@ -83,17 +84,17 @@ in a sandbox that only `solution.export` leaves.
 Steps 1 and 2 use `lake exe mathlib/cache get` on purpose. Plain `lake exe cache get` would also
 download our prebuilt copy of the submission, and `lake build Main` would then compile nothing.
 
-All four steps use Lean 4.36.0, which comes with both `leanexport` and `lake comparator`. The
-published source was written for Lean 4.33.1, which has neither, so checking `40e56bab` itself
-takes two toolchains.
-[The README from before the port](https://github.com/leanprover-community/riemann-hypothesis/blob/7cce738ba719a32964ca3822d0994f4c6952c7ae/README.md#checking-it)
+All four steps use the Lean release in `lean-toolchain`, which comes with both `leanexport` and
+`lake comparator`. The published source was written for Lean 4.33.1, which has neither, so
+checking `40e56bab` itself takes two toolchains.
+[An older version of this README](https://github.com/leanprover-community/riemann-hypothesis/blob/7cce738ba719a32964ca3822d0994f4c6952c7ae/README.md#checking-it)
 has those steps.
 
-We worked these steps out on the published source and don't have a complete run on the port
-yet. On the published source the build took hours on a large machine and about 100 GB of disk,
-and judging needs a lot of memory. [NOTES.md](verification/NOTES.md) says where the source came
-from, how the tools and sandboxes are set up and what a passing run does and doesn't show, but
-it hasn't been updated for the port either.
+We worked these steps out on the published source and don't have a complete run on the current
+source yet. On the published source the build took hours on a large machine and about 100 GB of
+disk, and judging needs a lot of memory. [NOTES.md](verification/NOTES.md) says where the source
+came from, how the tools and sandboxes are set up and what a passing run does and doesn't show,
+but it still describes the Lean 4.33.1 setup.
 
 ## CI
 
