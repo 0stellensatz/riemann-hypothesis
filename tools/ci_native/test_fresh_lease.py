@@ -19,7 +19,8 @@ class FreshLeaseTests(unittest.TestCase):
             (old / 'response-0.json').write_bytes(prior)
             producer = base / 'producer.py'
             producer.write_text('fixture')
-            rpc.atomic(control / 'lease.json', {'producer_sha256': rpc.digest(producer), 'worker': {}})
+            rpc.atomic(control / 'lease.json', {'operation': rpc.PROOF_OPERATION,
+                                              'producer_sha256': rpc.digest(producer), 'worker': {}})
             rpc.atomic(control / 'request-0.json', {})
             with patch.object(rpc, 'check_lease'), patch.object(rpc, 'resource_limits'), \
                  patch.object(rpc, 'stage_zip', side_effect=AssertionError('stale seed staging reached')):

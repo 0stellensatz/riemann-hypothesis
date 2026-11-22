@@ -61,6 +61,22 @@ class ProofProtocolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.plan(self.names[:257])
 
+    def test_proof_task_budget_matches_unit_and_rejects_unbounded_or_excessive(self):
+        values = {'memory.max': str(65536 * 1024**2), 'cpu.max': '1600000 100000',
+                  'pids.max': '16384'}
+        def check(mode, pids):
+            with patch.object(rpc, 'current_cgroup', return_value=Path('/sys/fs/cgroup')), \
+                 patch.object(Path, 'exists', return_value=True), \
+                 patch.object(Path, 'read_text', lambda p: pids if p.name == 'pids.max' else values[p.name]):
+                rpc.resource_limits(self.host, mode)
+        check(rpc.PROOF_OPERATION, '16384')
+        for pids in ('max', '16385', '0'):
+            with self.assertRaises(ValueError):
+                check(rpc.PROOF_OPERATION, pids)
+        with self.assertRaises(ValueError):
+            check(rpc.OPERATION, '16384')
+        check(rpc.OPERATION, '512')
+
     def test_proof_outputs_are_narrow(self):
         for suffix in rpc.PROOF_PARTS:
             self.assertTrue(rpc.proof_path('A' + suffix))
