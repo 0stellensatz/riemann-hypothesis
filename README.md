@@ -12,6 +12,13 @@ ones. `git diff --stat 40e56bab HEAD -- src` lists everything that has changed. 
 untouched original, check out `40e56bab` or use
 [riemann-hypothesis-original](https://github.com/homeowmorphism/riemann-hypothesis-original).
 
+**Verification scope:** The cache provides precompiled files for browsing and reuse. The
+`checks` workflow compiles the challenge statements; a separate workflow builds pull requests.
+A successful cache download or build does not establish that the proof has passed independent
+checking. Follow [Checking the proof](#checking-the-proof) for the verification procedure, and
+consult the [verification notes](verification/NOTES.md) for recorded results and the source
+revisions they cover.
+
 ## What is claimed
 
 `src/Main.lean` proves five theorems:
