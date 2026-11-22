@@ -102,6 +102,10 @@ def resolve(args):
             print('runner_label='+host['label'],file=out)
     print(json.dumps({'pr':args.pr,'status':request['quick_status'],'scope':'changed-modules-only','reason':request.get('reason','')}))
 
+def doctor_safe(report,host):
+    return (report.get('ready') and report.get('systemd_user') and report.get('cgroup_v2')
+            and report.get('physical_ram_gib',0) >= host['memory_gib']*1.5)
+
 def resource_limits(host, root=Path('/sys/fs/cgroup')):
     line=next(line for line in Path('/proc/self/cgroup').read_text().splitlines()if line.startswith('0::'))
     directory=root/line[3:].lstrip('/')
@@ -126,10 +130,10 @@ def run(args):
     if not selected['targets']:
         write(output/'result.json',selected); return 0
     # Host doctor runs trusted code before any candidate execution.
-    doctor = subprocess.run([sys.executable,str(HERE/'ci-runner.py'),'doctor','--work-directory',str(state),'--minimum-disk-gib','20'],capture_output=True,text=True)
+    doctor = subprocess.run([sys.executable,str(HERE/'ci-runner.py'),'doctor','--work-directory',str(state),'--minimum-disk-gib','100'],capture_output=True,text=True)
     (output/'doctor.json').write_text(doctor.stdout)
     report=json.loads(doctor.stdout)
-    if doctor.returncode or not report.get('ready') or not report.get('systemd_user') or not report.get('cgroup_v2'): raise ValueError('runner doctor failed; candidate was not executed')
+    if doctor.returncode or not doctor_safe(report,host): raise ValueError('runner doctor failed; candidate was not executed')
     paths_file=output/'paths.json'
     prep.prepare(SimpleNamespace(trusted=HERE.parent,candidate=candidate,state=state,request=args.request,output=paths_file,quick_plan=output/'plan.json'))
     paths=json.loads(paths_file.read_text())

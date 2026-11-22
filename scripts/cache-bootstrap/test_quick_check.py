@@ -23,6 +23,9 @@ class QuickChecks(unittest.TestCase):
  def test_unsafe_source_link_rejected(self):
   real=self.source('B','import Mathlib\n');(self.root/'src/A.lean').symlink_to(real)
   with self.assertRaises(ValueError):q.dependency_closure(self.root,['A'])
+ def test_live_low_memory_host_deferred(self):
+  host={'memory_gib':64};report={'ready':True,'systemd_user':True,'cgroup_v2':True,'physical_ram_gib':64}
+  self.assertFalse(q.doctor_safe(report,host));report['physical_ram_gib']=125.5;self.assertTrue(q.doctor_safe(report,host))
  def test_runner_registry_excludes_big(self):
   with self.assertRaises(ValueError):q.runner('james-192')
   self.assertEqual(q.runner('gcp-small')['runner_id'],298713)
