@@ -21,15 +21,17 @@ This work is taking place on the `main` branch. The `original` branch preserves 
 
 ## Theorem Statements
 
-`src/Main.lean` proves the following theorems (see [`src/Challenge.lean`](src/Challenge.lean)):
+`src/Main.lean` proves the following theorems:
 
 | Theorem | Statement |
 |---|---|
 | `riemannHypothesis` | Mathlib's `RiemannHypothesis` |
+| `riemannZeta_eq_zero_re` | An equivalent restatement of the Riemann Hypothesis not reliant on Mathlib directly: every zero of the Riemann Zeta function with 0 < Re s < 1 has Re s = 1/2 |
 | `LFunction_ne_zero_of_half_lt_re` | L(χ, s) ≠ 0 for Re s > 1/2, for every modulus and every Dirichlet character, except the trivial character at s = 1 |
 | `LFunction_eq_zero_re` | every zero of L(χ, s) with 0 < Re s < 1 has Re s = 1/2 |
+| `LFunction_eq_zero_re_of_isPrimitive` | every zero of L(χ, s) for a Primitive Dirichlet character χ with 0 < Re s < 1 has Re s = 1/2 |
 
- states the same five with `sorry` in place of the
+[`src/Challenge.lean`](src/Challenge.lean) states the same five with `sorry` in place of the
 proofs, in a file that imports only Mathlib. Comparator checks that `Main.lean` proves exactly
 those statements, that it uses no axioms other than `propext`, `Quot.sound` and
 `Classical.choice`, and that Lean's kernel and nanoda both accept the proof.
