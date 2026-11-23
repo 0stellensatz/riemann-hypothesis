@@ -1,5 +1,5 @@
 """Observe the dedicated build cgroup; no network or candidate-code execution."""
-import threading,time
+import json,os,tempfile,threading,time
 from pathlib import Path
 import rpc
 
@@ -43,3 +43,15 @@ class HostProfile:
                 'tasks_peak':after['tasks_peak'],'tasks_observed_max':self.tasks_observed,
                 'sample_interval_seconds':.5,'scope':'entire dedicated build cgroup, including wrapper and child processes',
                 'unknown_values_remain_null':True}
+
+
+def publish_profile(output,value):
+    """Create outside the sandbox-writable return directory, then replace its entry."""
+    output=Path(output).resolve();returned=output/'returned'
+    rpc.require(returned.is_dir()and not returned.is_symlink(),'invalid profile return directory')
+    fd,name=tempfile.mkstemp(prefix='.host-profile-',dir=output)
+    temporary=Path(name)
+    try:
+        with os.fdopen(fd,'w')as stream:json.dump(value,stream,separators=(',',':'));stream.write('\n')
+        os.replace(temporary,returned/'host-profile.json')
+    finally:temporary.unlink(missing_ok=True)
