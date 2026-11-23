@@ -134,8 +134,9 @@ them: `comparator.json` at the root, and `Challenge` as a library in `src/`.
 - On its face that is more than `PrimitiveDirichletLZerosOnLine`, which speaks only of
   0 < Re s < 1: none of our three Dirichlet statements says anything about zeros with
   Re s ≤ 0. The bridge below shows that nothing is lost.
-- The statement of the theorem has had the same text since it was added on 2025-11-06, and
-  `trivialZeros` since 2025-11-07. We compared every commit that has touched the file.
+- The statement of the theorem has had the same text since it was added on 2025-11-06, and the
+  definition of `trivialZeros` since 2025-11-07; only its docstring changed after that. We
+  compared every commit that has touched the file.
 
 **Credit.** These statements are the work of the formal-conjectures authors, and what is copied
 from them here is under their Apache 2.0 license.
@@ -170,10 +171,15 @@ formal-conjectures' text at commit `d8d031d4` in three ways:
   the definition the kernel sees.
 - formal-conjectures' own `category` and `AMS` attributes are left out.
 
+Two declarations of those files are not copied, because the statements do not use them: the
+test `GRH.implies_riemannHypothesis` and the `Decidable` instance for even characters.
+
 Two things tie the copy to the original:
 
 - CI fetches the two formal-conjectures files at that commit and checks that each copied
-  declaration is their text, with those three differences and no others.
+  declaration is their text, with those three differences and no others. It also checks that
+  the copy holds nothing else but comments, its import, and the `module`, `section` and
+  `namespace` lines: no `open`, no option, no declaration of its own.
 - Built on formal-conjectures' own pins, Lean `v4.33.1` and Mathlib `0df444a360ea`, the copy was
   judged against the export of formal-conjectures' own file, which is 350,866,107 bytes with
   sha256 `75aa4a26e43ba9ea2998ba28ebdec4d72c43b43944e6c333963c4cfeda08c2c1`. `lake comparator`
@@ -291,8 +297,8 @@ export is 356,115,533 bytes, with sha256
 placeholder's solution export is 426,481,210 bytes.
 
 The `formal-conjectures` job in CI repeats the rehearsal. It runs when something it reads
-changes: `comparator/`, `src/Statements.lean`, the two pins in `lake-manifest.json` and
-`lean-toolchain`, or the workflow itself. No other change can alter its result, so pull
+changes: `comparator/`, `src/Statements.lean`, `lakefile.toml`, the two pins in
+`lake-manifest.json` and `lean-toolchain`, or the workflow itself. No other change can alter its result, so pull
 requests that touch only the proof, the scripts or the documentation do not run it. GitHub
 looks at the first 3,000 changed files only, so a larger pull request that changes one of these
 needs a manual run.

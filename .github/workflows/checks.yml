@@ -6,7 +6,7 @@ name: checks
 
 # The rehearsal reads only the files listed under `paths`, so it runs when one of those changes:
 # on pull requests, on main, and by manual dispatch. Other changes cannot alter its result. Keep
-# the two lists the same. GitHub looks at the first 3,000 changed files only, so a larger pull
+# the two lists the same, and the job's sparse checkout within them. GitHub looks at the first 3,000 changed files only, so a larger pull
 # request that changes one of these may need a manual dispatch.
 on:
   push:
@@ -14,6 +14,7 @@ on:
     paths:
       - comparator/**
       - src/Statements.lean
+      - lakefile.toml
       - lake-manifest.json
       - lean-toolchain
       - .github/workflows/checks.yml
@@ -21,6 +22,7 @@ on:
     paths:
       - comparator/**
       - src/Statements.lean
+      - lakefile.toml
       - lake-manifest.json
       - lean-toolchain
       - .github/workflows/checks.yml
@@ -124,15 +126,30 @@ jobs:
               "instance {S", "instance instDecidablePredOddOfDecidableEq_formalConjecturesForMathlib {S")
           copied["trivialZeros"] = copied["trivialZeros"].replace("\ndef trivialZeros", "\nnoncomputable def trivialZeros")
 
-          def check(file, names):
-              ours = squash(open(file, encoding="utf-8").read())
-              for name in names:
-                  if squash(copied[name]) not in ours:
+          # A file must be this frame, with each <name> standing for that declaration as copied
+          # above, and comments. So it has no `open`, option or declaration of its own.
+          def check(file, frame):
+              rest = squash(open(file, encoding="utf-8").read())
+              for name in re.findall(r"<(\w+)>", frame):
+                  if rest.count(squash(copied[name])) != 1:
                       raise SystemExit(f"{file}: `{name}` is not formal-conjectures' text")
+                  rest = rest.replace(squash(copied[name]), f"<{name}>")
                   print(f"{file}: `{name}` matches")
+              rest = squash(re.sub(r"/-.*?-/", " ", rest))
+              if rest != squash(frame):
+                  raise SystemExit(f"{file}: more than the copied declarations and comments:\n{rest}")
+              print(f"{file}: nothing else but comments")
 
-          check("comparator/FormalConjecturesChallenge.lean", list(copied))
-          check("comparator/FormalConjecturesStatement.lean", ["instance", "trivialZeros"])
+          check("comparator/FormalConjecturesChallenge.lean", """
+              module public import Mathlib @[expose] public section
+              namespace DirichletCharacter <instance> end DirichletCharacter
+              namespace RiemannHypothesis <riemannHypothesis> end RiemannHypothesis
+              namespace GRH <trivialZeros> <generalized_riemann_hypothesis> end GRH""")
+          check("comparator/FormalConjecturesStatement.lean", """
+              module public import Mathlib.NumberTheory.LSeries.DirichletContinuation
+              @[expose] public section
+              namespace DirichletCharacter <instance> end DirichletCharacter
+              namespace GRH <trivialZeros> end GRH""")
           PY
 
       - name: Install elan
