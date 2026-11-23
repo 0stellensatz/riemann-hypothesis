@@ -297,8 +297,9 @@ export is 356,115,533 bytes, with sha256
 placeholder's solution export is 426,481,210 bytes.
 
 The `formal-conjectures` job in CI repeats the rehearsal. It runs when something it reads
-changes: `comparator/`, `src/Statements.lean`, `lakefile.toml`, the two pins in
-`lake-manifest.json` and `lean-toolchain`, or the workflow itself. No other change can alter its result, so pull
+changes: `comparator/`, `src/Statements.lean`, the first setup's `src/Challenge.lean` and
+`export-targets.txt`, `lakefile.toml`, the two pins in `lake-manifest.json` and
+`lean-toolchain`, or the workflow itself. No other change can alter its result, so pull
 requests that touch only the proof, the scripts or the documentation do not run it. GitHub
 looks at the first 3,000 changed files only, so a larger pull request that changes one of these
 needs a manual run.
@@ -318,8 +319,12 @@ its head, and fails if they differ. It runs the base branch's copy of the workfl
 from the pull request, so a pull request cannot switch it off. For that reason CI no longer
 builds `Challenge` on every push: with the file and the pins unchanged, what it states cannot
 change.
-On Lean and Mathlib `v4.36.0`, `challenge.export` made the way the README makes it has sha256
-`ccaa35047adcb2b493ad0ca36abfdd02633b56f5afad009d027b4570ee0f2194`, measured on our machine.
+
+The pins are not frozen. So the `formal-conjectures` job, which runs when a pin changes, also
+makes `challenge.export` the way the README makes it, and checks its checksum. On Lean and
+Mathlib `v4.36.0` that is sha256
+`ccaa35047adcb2b493ad0ca36abfdd02633b56f5afad009d027b4570ee0f2194`, first measured on our
+machine.
 
 **On a real build, on the earlier pins.** Before #66, ishaan2006 ran the same steps against a
 build of the published archive on Lean `v4.33.1`, and reported the results on the pull request
