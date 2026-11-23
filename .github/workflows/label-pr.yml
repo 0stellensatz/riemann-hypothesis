@@ -4,6 +4,8 @@ name: Label PR
 # labels each PR by size, using the larger of its added and removed line counts: under 100 is
 # extra small, under 1,000 small, under 10,000 medium, under 100,000 large, and 100,000 or more
 # extra large. The counts are GitHub's own for the PR, so the job never downloads file contents.
+# GitHub gives +0 -0 for a PR too large for it to diff, so the size is never taken to be less
+# than the number of paths the PR changes.
 #
 # pull_request_target lets the token label PRs from forks. Nothing from the PR is checked out
 # or run: the job fetches commits and trees without file contents and lists the changed paths
@@ -87,7 +89,11 @@ jobs:
             exit 0
           fi
 
+          # GitHub reports +0 -0 for a PR too large for it to diff, which would make the largest
+          # PRs extra small. The number of changed paths is a floor for the size.
+          paths=$(tr -cd '\0' < changed | wc -c)
           size=$(( additions > deletions ? additions : deletions ))
+          size=$(( size > paths ? size : paths ))
           if (( size < 100 )); then
             size_label='extra small'
           elif (( size < 1000 )); then
@@ -99,7 +105,7 @@ jobs:
           else
             size_label='extra large'
           fi
-          echo "$size_label: +$additions -$deletions"
+          echo "$size_label: +$additions -$deletions, $(( paths )) changed paths"
           wrong_size=()
           for label in 'extra small' small medium large 'extra large'; do
             if [[ "$label" == "$size_label" ]]; then add+=("$label"); else wrong_size+=("$label"); fi
